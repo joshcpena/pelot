@@ -58,6 +58,7 @@ export type ThemeColors = {
   accentSoft: string;
   success: string;
   danger: string;
+  dangerSoft: string;
   warning: string;
   inverseBackground: string;
   inverseText: string;
@@ -75,6 +76,7 @@ const darkColors: ThemeColors = {
   accentSoft: '#0d1b2f',
   success: '#238636',
   danger: '#da3633',
+  dangerSoft: '#2d1415',
   warning: '#f2cc60',
   inverseBackground: '#f0f6fc',
   inverseText: '#0d1117',
@@ -92,6 +94,7 @@ const lightColors: ThemeColors = {
   accentSoft: '#ddf4ff',
   success: '#1a7f37',
   danger: '#cf222e',
+  dangerSoft: '#ffebe9',
   warning: '#9a6700',
   inverseBackground: '#0d1117',
   inverseText: '#ffffff',

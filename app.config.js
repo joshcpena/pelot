@@ -31,13 +31,6 @@ module.exports = {
     },
     android: {
       package: 'com.josh.pelot',
-      config: googleMapsApiKey
-        ? {
-            googleMaps: {
-              apiKey: googleMapsApiKey,
-            },
-          }
-        : undefined,
       permissions: [
         'ACCESS_COARSE_LOCATION',
         'ACCESS_FINE_LOCATION',

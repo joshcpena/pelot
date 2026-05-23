@@ -39,7 +39,27 @@ export type RideMetrics = {
   lapMaxSpeedMps: number;
 };
 
-export type DashboardCardSpan = '1x1' | '2x1' | '3x1' | '2x2' | '3x2' | '3x3';
+export type DashboardCardSpan =
+  | '1x1'
+  | '1x2'
+  | '1x3'
+  | '1x4'
+  | '1x5'
+  | '1.5x1'
+  | '1.5x2'
+  | '1.5x3'
+  | '1.5x4'
+  | '1.5x5'
+  | '2x1'
+  | '2x2'
+  | '2x3'
+  | '2x4'
+  | '2x5'
+  | '3x1'
+  | '3x2'
+  | '3x3'
+  | '3x4'
+  | '3x5';
 
 export type DashboardMetricId =
   | 'caloriesTotal'

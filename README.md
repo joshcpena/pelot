@@ -16,7 +16,15 @@ cp .env.example .env
 npm run android
 ```
 
-Set `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` in `.env` before starting Expo.
+Set `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` in `.env` before starting Expo. For
+native Android Gradle builds, the committed manifest uses a placeholder and
+Gradle reads the key from either the `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY`
+environment variable or an uncommitted `googleMapsApiKey=...` entry in
+`android/local.properties`.
+
+Do not commit real API keys. The checked-in
+`android/app/src/main/AndroidManifest.xml` must keep
+`android:value="${googleMapsApiKey}"`.
 
 Expo Go cannot apply the Android native Google Maps API key from app config. To
 test Android maps with your key, use a development build such as

@@ -13,11 +13,6 @@ const menuItems = [
     description: 'Units, auto-pause, keep-awake, splits, and map display.',
   },
   {
-    href: '/edit-dashboard',
-    title: 'Edit dashboard',
-    description: 'Add, remove, resize, and reorder ride metrics.',
-  },
-  {
     href: '/permissions',
     title: 'Permissions',
     description: 'Location access for foreground and background recording.',

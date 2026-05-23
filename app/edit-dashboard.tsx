@@ -71,11 +71,7 @@ export default function EditDashboardScreen() {
     if (metricPickerCardId === 'new') {
       persist([...layout, createDashboardCard(metricId)]);
     } else if (metricPickerCardId) {
-      const metric = dashboardMetricById.get(metricId);
-      updateCard(metricPickerCardId, {
-        metricId,
-        span: metric?.defaultSpan ?? '1x1',
-      });
+      updateCard(metricPickerCardId, { metricId });
     }
 
     setMetricPickerCardId(null);

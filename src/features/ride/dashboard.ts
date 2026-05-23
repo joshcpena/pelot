@@ -46,26 +46,38 @@ export type DashboardMetricDefinition = {
 
 export const dashboardSpans: DashboardCardSpan[] = [
   '1x1',
+  '1x2',
+  '1x3',
+  '1x4',
+  '1x5',
+  '1.5x1',
+  '1.5x2',
+  '1.5x3',
+  '1.5x4',
+  '1.5x5',
   '2x1',
-  '3x1',
   '2x2',
+  '2x3',
+  '2x4',
+  '2x5',
+  '3x1',
   '3x2',
   '3x3',
+  '3x4',
+  '3x5',
 ];
 
 export const defaultDashboardLayout: DashboardCard[] = [
   { id: 'card-map', metricId: 'map', span: '3x3' },
-  { id: 'card-speed-current', metricId: 'speedCurrent', span: '3x1' },
-  { id: 'card-total-distance', metricId: 'totalDistance', span: '1x1' },
-  { id: 'card-total-time', metricId: 'totalTimeRecorded', span: '1x1' },
-  { id: 'card-speed-average', metricId: 'speedAverage', span: '1x1' },
-  { id: 'card-speed-max', metricId: 'speedMax', span: '1x1' },
-  { id: 'card-total-ascent', metricId: 'totalAscent', span: '1x1' },
-  { id: 'card-lap-number', metricId: 'lapNumber', span: '1x1' },
+  { id: 'card-total-distance', metricId: 'totalDistance', span: '1.5x2' },
+  { id: 'card-total-time', metricId: 'totalTimeRecorded', span: '1.5x2' },
+  { id: 'card-speed-current', metricId: 'speedCurrent', span: '3x2' },
+  { id: 'card-pace-current', metricId: 'paceCurrent', span: '1.5x2' },
+  { id: 'card-calories-total', metricId: 'caloriesTotal', span: '1.5x2' },
 ];
 
 const allSpans = dashboardSpans;
-const metricSpans: DashboardCardSpan[] = ['1x1', '2x1', '3x1', '2x2', '3x2'];
+const metricSpans = dashboardSpans;
 
 function unavailable() {
   return '-!-';
@@ -529,21 +541,34 @@ export function validateDashboardLayout(value: unknown): DashboardCard[] {
     return defaultDashboardLayout;
   }
 
-  const validCards = value.filter((card): card is DashboardCard => {
-    if (!card || typeof card !== 'object') {
-      return false;
-    }
+  const validCards = value
+    .filter((card): card is DashboardCard => {
+      if (!card || typeof card !== 'object') {
+        return false;
+      }
 
-    const candidate = card as Partial<DashboardCard>;
+      const candidate = card as Partial<DashboardCard>;
 
-    return (
-      typeof candidate.id === 'string' &&
-      typeof candidate.metricId === 'string' &&
-      dashboardMetricById.has(candidate.metricId as DashboardMetricId) &&
-      typeof candidate.span === 'string' &&
-      dashboardSpans.includes(candidate.span as DashboardCardSpan)
-    );
-  });
+      if (typeof candidate.span !== 'string') {
+        return false;
+      }
+
+      const normalizedSpan = candidate.span.replace(
+        '1/2x',
+        '1.5x',
+      ) as DashboardCardSpan;
+
+      return (
+        typeof candidate.id === 'string' &&
+        typeof candidate.metricId === 'string' &&
+        dashboardMetricById.has(candidate.metricId as DashboardMetricId) &&
+        dashboardSpans.includes(normalizedSpan)
+      );
+    })
+    .map((card) => ({
+      ...card,
+      span: card.span.replace('1/2x', '1.5x') as DashboardCardSpan,
+    }));
 
   return validCards.length > 0 ? validCards : defaultDashboardLayout;
 }
