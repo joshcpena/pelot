@@ -68,6 +68,20 @@ export function formatSpeed(mps: number, unitSystem: 'imperial' | 'metric') {
   return `${(mps * 2.236936).toFixed(1)} mph`;
 }
 
+export function formatPace(mps: number, unitSystem: 'imperial' | 'metric') {
+  if (mps <= 0) {
+    return '--';
+  }
+
+  const metersPerUnit = unitSystem === 'metric' ? 1000 : 1609.344;
+  const secondsPerUnit = metersPerUnit / mps;
+  const minutes = Math.floor(secondsPerUnit / 60);
+  const seconds = Math.round(secondsPerUnit % 60);
+  const unit = unitSystem === 'metric' ? 'km' : 'mi';
+
+  return `${minutes}:${seconds.toString().padStart(2, '0')} /${unit}`;
+}
+
 export function formatAscent(
   meters: number,
   unitSystem: 'imperial' | 'metric',
@@ -77,4 +91,15 @@ export function formatAscent(
   }
 
   return `${Math.round(meters * 3.28084)} ft`;
+}
+
+export function formatTimeOfDay(timestamp: number | null) {
+  if (timestamp == null) {
+    return '--';
+  }
+
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }

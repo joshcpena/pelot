@@ -200,13 +200,23 @@ export function calculateMetricsFromPoints(points: RidePoint[]): RideMetrics {
       : 0;
 
   return {
+    startedAt: points[0]?.recordedAt ?? null,
     elapsedSeconds,
     movingSeconds,
+    pausedSeconds: 0,
     distanceMeters,
     ascentMeters,
     currentSpeedMps: points[points.length - 1]?.speedMps ?? 0,
     averageSpeedMps: movingSeconds > 0 ? distanceMeters / movingSeconds : 0,
     maxSpeedMps,
+    lapNumber: 1,
+    lapStartedAt: points[0]?.recordedAt ?? null,
+    lapElapsedSeconds: elapsedSeconds,
+    lapMovingSeconds: movingSeconds,
+    lapDistanceMeters: distanceMeters,
+    lapAscentMeters: ascentMeters,
+    lapAverageSpeedMps: movingSeconds > 0 ? distanceMeters / movingSeconds : 0,
+    lapMaxSpeedMps: maxSpeedMps,
   };
 }
 

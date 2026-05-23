@@ -3,3 +3,8 @@ node_modules
 dist
 build
 coverage
+android/.gradle
+android/.cxx
+android/app/.cxx
+android/build
+android/app/build

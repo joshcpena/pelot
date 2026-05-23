@@ -9,6 +9,11 @@ import {
   formatSpeed,
 } from '../src/features/ride/metrics';
 import {
+  type ThemeColors,
+  useRideSettings,
+  useThemeColors,
+} from '../src/features/settings/settings';
+import {
   loadRecentRides,
   loadRideSplits,
   type RideSplit,
@@ -16,6 +21,9 @@ import {
 } from '../src/features/ride/rideStorage';
 
 export default function HistoryScreen() {
+  const { settings } = useRideSettings();
+  const colors = useThemeColors();
+  const styles = createStyles(colors);
   const [rides, setRides] = useState<RideSummary[]>([]);
   const [splitsByRideId, setSplitsByRideId] = useState<
     Record<string, RideSplit[]>
@@ -79,26 +87,32 @@ export default function HistoryScreen() {
           </Text>
           <View style={styles.grid}>
             <SummaryMetric
+              styles={styles}
               label="Distance"
-              value={formatDistance(ride.distanceMeters, ride.unitPreference)}
+              value={formatDistance(ride.distanceMeters, settings.unitSystem)}
             />
             <SummaryMetric
+              styles={styles}
               label="Time"
               value={formatDuration(ride.elapsedSeconds)}
             />
             <SummaryMetric
+              styles={styles}
               label="Average"
-              value={formatSpeed(ride.averageSpeedMps, ride.unitPreference)}
+              value={formatSpeed(ride.averageSpeedMps, settings.unitSystem)}
             />
             <SummaryMetric
+              styles={styles}
               label="Max"
-              value={formatSpeed(ride.maxSpeedMps, ride.unitPreference)}
+              value={formatSpeed(ride.maxSpeedMps, settings.unitSystem)}
             />
             <SummaryMetric
+              styles={styles}
               label="Ascent"
-              value={formatAscent(ride.ascentMeters, ride.unitPreference)}
+              value={formatAscent(ride.ascentMeters, settings.unitSystem)}
             />
             <SummaryMetric
+              styles={styles}
               label="Moving"
               value={formatDuration(ride.movingSeconds)}
             />
@@ -112,9 +126,9 @@ export default function HistoryScreen() {
               >
                 <Text style={styles.splitIndex}>{split.splitIndex}</Text>
                 <Text style={styles.splitText}>
-                  {formatDistance(split.distanceMeters, ride.unitPreference)} ·{' '}
+                  {formatDistance(split.distanceMeters, settings.unitSystem)} ·{' '}
                   {formatDuration(split.durationSeconds)} ·{' '}
-                  {formatSpeed(split.averageSpeedMps, ride.unitPreference)}
+                  {formatSpeed(split.averageSpeedMps, settings.unitSystem)}
                 </Text>
               </View>
             ))}
@@ -128,7 +142,15 @@ export default function HistoryScreen() {
   );
 }
 
-function SummaryMetric({ label, value }: { label: string; value: string }) {
+function SummaryMetric({
+  label,
+  value,
+  styles,
+}: {
+  label: string;
+  value: string;
+  styles: ReturnType<typeof createStyles>;
+}) {
   return (
     <View style={styles.metric}>
       <Text style={styles.metricLabel}>{label}</Text>
@@ -137,92 +159,94 @@ function SummaryMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0d1117',
-  },
-  content: {
-    gap: 18,
-    padding: 24,
-    paddingTop: 72,
-  },
-  header: {
-    gap: 10,
-  },
-  title: {
-    color: '#fff',
-    fontSize: 34,
-    fontWeight: '900',
-  },
-  link: {
-    color: '#58a6ff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  muted: {
-    color: '#8b949e',
-    fontSize: 15,
-    lineHeight: 21,
-  },
-  card: {
-    gap: 14,
-    borderRadius: 22,
-    backgroundColor: '#161b22',
-    padding: 18,
-  },
-  date: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  metric: {
-    minWidth: '47%',
-    flex: 1,
-    gap: 4,
-  },
-  metricLabel: {
-    color: '#8b949e',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.7,
-    textTransform: 'uppercase',
-  },
-  metricValue: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '900',
-  },
-  splits: {
-    gap: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#30363d',
-    paddingTop: 12,
-  },
-  splitsTitle: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  splitRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  splitIndex: {
-    width: 26,
-    color: '#7ee787',
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  splitText: {
-    flex: 1,
-    color: '#c9d1d9',
-    fontSize: 14,
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    content: {
+      gap: 18,
+      padding: 24,
+      paddingTop: 72,
+    },
+    header: {
+      gap: 10,
+    },
+    title: {
+      color: colors.primaryText,
+      fontSize: 34,
+      fontWeight: '900',
+    },
+    link: {
+      color: colors.accent,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    muted: {
+      color: colors.mutedText,
+      fontSize: 15,
+      lineHeight: 21,
+    },
+    card: {
+      gap: 14,
+      borderRadius: 22,
+      backgroundColor: colors.card,
+      padding: 18,
+    },
+    date: {
+      color: colors.primaryText,
+      fontSize: 18,
+      fontWeight: '800',
+    },
+    grid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 10,
+    },
+    metric: {
+      minWidth: '47%',
+      flex: 1,
+      gap: 4,
+    },
+    metricLabel: {
+      color: colors.mutedText,
+      fontSize: 12,
+      fontWeight: '800',
+      letterSpacing: 0.7,
+      textTransform: 'uppercase',
+    },
+    metricValue: {
+      color: colors.primaryText,
+      fontSize: 20,
+      fontWeight: '900',
+    },
+    splits: {
+      gap: 8,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      paddingTop: 12,
+    },
+    splitsTitle: {
+      color: colors.primaryText,
+      fontSize: 16,
+      fontWeight: '900',
+    },
+    splitRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    splitIndex: {
+      width: 26,
+      color: colors.success,
+      fontSize: 14,
+      fontWeight: '900',
+    },
+    splitText: {
+      flex: 1,
+      color: colors.secondaryText,
+      fontSize: 14,
+    },
+  });
+}

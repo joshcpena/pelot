@@ -9,7 +9,11 @@ import {
   View,
 } from 'react-native';
 
-import { useRideSettings } from '../src/features/settings/settings';
+import {
+  type ThemeColors,
+  useRideSettings,
+  useThemeColors,
+} from '../src/features/settings/settings';
 import type { RideSettings } from '../src/features/ride/types';
 
 function OptionButton<T extends string>({
@@ -17,11 +21,13 @@ function OptionButton<T extends string>({
   value,
   selectedValue,
   onSelect,
+  styles,
 }: {
   label: string;
   value: T;
   selectedValue: T;
   onSelect: (value: T) => void;
+  styles: ReturnType<typeof createStyles>;
 }) {
   const isSelected = value === selectedValue;
 
@@ -42,7 +48,43 @@ function OptionButton<T extends string>({
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function ValueButton({
+  label,
+  selected,
+  onPress,
+  styles,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  return (
+    <Pressable
+      style={[styles.optionButton, selected && styles.optionButtonSelected]}
+      onPress={onPress}
+    >
+      <Text
+        style={[
+          styles.optionButtonText,
+          selected && styles.optionButtonTextSelected,
+        ]}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function Section({
+  title,
+  children,
+  styles,
+}: {
+  title: string;
+  children: ReactNode;
+  styles: ReturnType<typeof createStyles>;
+}) {
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{title}</Text>
@@ -53,6 +95,8 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 export default function SettingsScreen() {
   const { settings, isLoading, updateSetting } = useRideSettings();
+  const colors = useThemeColors();
+  const styles = createStyles(colors);
 
   function update<K extends keyof RideSettings>(
     key: K,
@@ -61,6 +105,29 @@ export default function SettingsScreen() {
     updateSetting(key, value).catch(() => {});
   }
 
+  function updateUnitSystem(unitSystem: RideSettings['unitSystem']) {
+    update('unitSystem', unitSystem);
+    update('splitDistanceMeters', unitSystem === 'metric' ? 1000 : 1609.344);
+  }
+
+  const distancePresets =
+    settings.unitSystem === 'metric'
+      ? [
+          { label: '1 km', value: 1000 },
+          { label: '5 km', value: 5000 },
+          { label: '10 km', value: 10000 },
+        ]
+      : [
+          { label: '1 mi', value: 1609.344 },
+          { label: '5 mi', value: 8046.72 },
+          { label: '10 mi', value: 16093.44 },
+        ];
+  const timePresets = [
+    { label: '5 min', value: 300 },
+    { label: '10 min', value: 600 },
+    { label: '20 min', value: 1200 },
+  ];
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Settings</Text>
@@ -68,24 +135,26 @@ export default function SettingsScreen() {
         <Text style={styles.muted}>Loading saved preferences...</Text>
       ) : null}
 
-      <Section title="Units">
+      <Section title="Units" styles={styles}>
         <View style={styles.rowWrap}>
           <OptionButton
+            styles={styles}
             label="Imperial"
             value="imperial"
             selectedValue={settings.unitSystem}
-            onSelect={(value) => update('unitSystem', value)}
+            onSelect={updateUnitSystem}
           />
           <OptionButton
+            styles={styles}
             label="Metric"
             value="metric"
             selectedValue={settings.unitSystem}
-            onSelect={(value) => update('unitSystem', value)}
+            onSelect={updateUnitSystem}
           />
         </View>
       </Section>
 
-      <Section title="Ride Behavior">
+      <Section title="Ride Behavior" styles={styles}>
         <View style={styles.switchRow}>
           <View style={styles.switchCopy}>
             <Text style={styles.label}>Keep screen awake</Text>
@@ -110,17 +179,31 @@ export default function SettingsScreen() {
             onValueChange={(value) => update('autoPause', value)}
           />
         </View>
+        <View style={styles.switchRow}>
+          <View style={styles.switchCopy}>
+            <Text style={styles.label}>Auto-lap</Text>
+            <Text style={styles.muted}>
+              Start a new lap automatically by split distance or time.
+            </Text>
+          </View>
+          <Switch
+            value={settings.autoLap}
+            onValueChange={(value) => update('autoLap', value)}
+          />
+        </View>
       </Section>
 
-      <Section title="Ascent Source">
+      <Section title="Ascent Source" styles={styles}>
         <View style={styles.rowWrap}>
           <OptionButton
+            styles={styles}
             label="Prefer sensors"
             value="barometer-preferred"
             selectedValue={settings.ascentSource}
             onSelect={(value) => update('ascentSource', value)}
           />
           <OptionButton
+            styles={styles}
             label="GPS only"
             value="gps-only"
             selectedValue={settings.ascentSource}
@@ -129,15 +212,17 @@ export default function SettingsScreen() {
         </View>
       </Section>
 
-      <Section title="GPS">
+      <Section title="GPS" styles={styles}>
         <View style={styles.rowWrap}>
           <OptionButton
+            styles={styles}
             label="Best"
             value="best"
             selectedValue={settings.gpsAccuracy}
             onSelect={(value) => update('gpsAccuracy', value)}
           />
           <OptionButton
+            styles={styles}
             label="Balanced"
             value="balanced"
             selectedValue={settings.gpsAccuracy}
@@ -146,41 +231,71 @@ export default function SettingsScreen() {
         </View>
       </Section>
 
-      <Section title="Splits">
+      <Section title="Splits" styles={styles}>
         <View style={styles.rowWrap}>
           <OptionButton
+            styles={styles}
             label="Distance"
             value="distance"
             selectedValue={settings.splitType}
             onSelect={(value) => update('splitType', value)}
           />
           <OptionButton
+            styles={styles}
             label="Time"
             value="time"
             selectedValue={settings.splitType}
             onSelect={(value) => update('splitType', value)}
           />
         </View>
+        <View style={styles.rowWrap}>
+          {(settings.splitType === 'distance'
+            ? distancePresets
+            : timePresets
+          ).map((preset) => (
+            <ValueButton
+              key={preset.label}
+              styles={styles}
+              label={preset.label}
+              selected={
+                settings.splitType === 'distance'
+                  ? settings.splitDistanceMeters === preset.value
+                  : settings.splitDurationSeconds === preset.value
+              }
+              onPress={() =>
+                update(
+                  settings.splitType === 'distance'
+                    ? 'splitDistanceMeters'
+                    : 'splitDurationSeconds',
+                  preset.value,
+                )
+              }
+            />
+          ))}
+        </View>
         <Text style={styles.muted}>
-          Defaults: 1 mi / 1 km equivalent or 5 minutes.
+          Defaults: 1 mi / 1 km equivalent or 10 minutes.
         </Text>
       </Section>
 
-      <Section title="Display">
+      <Section title="Display" styles={styles}>
         <View style={styles.rowWrap}>
           <OptionButton
+            styles={styles}
             label="System"
             value="system"
             selectedValue={settings.theme}
             onSelect={(value) => update('theme', value)}
           />
           <OptionButton
+            styles={styles}
             label="Light"
             value="light"
             selectedValue={settings.theme}
             onSelect={(value) => update('theme', value)}
           />
           <OptionButton
+            styles={styles}
             label="Dark"
             value="dark"
             selectedValue={settings.theme}
@@ -189,18 +304,21 @@ export default function SettingsScreen() {
         </View>
         <View style={styles.rowWrap}>
           <OptionButton
+            styles={styles}
             label="Map"
             value="standard"
             selectedValue={settings.mapType}
             onSelect={(value) => update('mapType', value)}
           />
           <OptionButton
+            styles={styles}
             label="Satellite"
             value="satellite"
             selectedValue={settings.mapType}
             onSelect={(value) => update('mapType', value)}
           />
           <OptionButton
+            styles={styles}
             label="Hybrid"
             value="hybrid"
             selectedValue={settings.mapType}
@@ -216,79 +334,85 @@ export default function SettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0d1117',
-  },
-  content: {
-    gap: 18,
-    padding: 24,
-    paddingTop: 72,
-  },
-  title: {
-    color: '#fff',
-    fontSize: 34,
-    fontWeight: '800',
-  },
-  section: {
-    gap: 12,
-    borderRadius: 18,
-    backgroundColor: '#161b22',
-    padding: 18,
-  },
-  sectionTitle: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '800',
-  },
-  rowWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 16,
-  },
-  switchCopy: {
-    flex: 1,
-    gap: 3,
-  },
-  label: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  muted: {
-    color: '#8b949e',
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  optionButton: {
-    borderWidth: 1,
-    borderColor: '#30363d',
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  optionButtonSelected: {
-    borderColor: '#2f81f7',
-    backgroundColor: '#1f6feb',
-  },
-  optionButtonText: {
-    color: '#c9d1d9',
-    fontWeight: '700',
-  },
-  optionButtonTextSelected: {
-    color: '#fff',
-  },
-  link: {
-    color: '#58a6ff',
-    fontSize: 16,
-    fontWeight: '700',
-    paddingBottom: 36,
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    content: {
+      gap: 0,
+      paddingTop: 48,
+      paddingBottom: 24,
+    },
+    title: {
+      color: colors.primaryText,
+      fontSize: 30,
+      fontWeight: '800',
+      paddingHorizontal: 12,
+      paddingBottom: 12,
+    },
+    section: {
+      gap: 8,
+      backgroundColor: colors.card,
+      padding: 12,
+    },
+    sectionTitle: {
+      color: colors.primaryText,
+      fontSize: 16,
+      fontWeight: '800',
+      letterSpacing: 0.4,
+      textTransform: 'uppercase',
+    },
+    rowWrap: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    switchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+    },
+    switchCopy: {
+      flex: 1,
+      gap: 3,
+    },
+    label: {
+      color: colors.primaryText,
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    muted: {
+      color: colors.mutedText,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    optionButton: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    optionButtonSelected: {
+      borderColor: colors.accent,
+      backgroundColor: colors.accent,
+    },
+    optionButtonText: {
+      color: colors.secondaryText,
+      fontWeight: '700',
+    },
+    optionButtonTextSelected: {
+      color: '#fff',
+    },
+    link: {
+      color: colors.accent,
+      fontSize: 15,
+      fontWeight: '700',
+      paddingHorizontal: 12,
+      paddingTop: 14,
+      paddingBottom: 24,
+    },
+  });
+}

@@ -3,12 +3,19 @@ import * as Location from 'expo-location';
 import { Link } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import {
+  type ThemeColors,
+  useThemeColors,
+} from '../src/features/settings/settings';
+
 type PermissionState = {
   foreground: Location.PermissionStatus | 'unknown';
   background: Location.PermissionStatus | 'unknown';
 };
 
 export default function PermissionsScreen() {
+  const colors = useThemeColors();
+  const styles = createStyles(colors);
   const [permissions, setPermissions] = useState<PermissionState>({
     foreground: 'unknown',
     background: 'unknown',
@@ -85,54 +92,56 @@ export default function PermissionsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    gap: 16,
-    backgroundColor: '#0d1117',
-    padding: 24,
-    paddingTop: 72,
-  },
-  title: {
-    color: '#fff',
-    fontSize: 34,
-    fontWeight: '800',
-  },
-  copy: {
-    color: '#a9b4c0',
-    fontSize: 16,
-    lineHeight: 23,
-  },
-  card: {
-    gap: 8,
-    borderRadius: 18,
-    backgroundColor: '#161b22',
-    padding: 18,
-  },
-  label: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  value: {
-    color: '#7ee787',
-    fontSize: 15,
-    textTransform: 'uppercase',
-  },
-  button: {
-    alignItems: 'center',
-    borderRadius: 999,
-    backgroundColor: '#238636',
-    padding: 14,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  link: {
-    color: '#58a6ff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      gap: 16,
+      backgroundColor: colors.background,
+      padding: 24,
+      paddingTop: 72,
+    },
+    title: {
+      color: colors.primaryText,
+      fontSize: 34,
+      fontWeight: '800',
+    },
+    copy: {
+      color: colors.secondaryText,
+      fontSize: 16,
+      lineHeight: 23,
+    },
+    card: {
+      gap: 8,
+      borderRadius: 18,
+      backgroundColor: colors.card,
+      padding: 18,
+    },
+    label: {
+      color: colors.primaryText,
+      fontSize: 18,
+      fontWeight: '700',
+    },
+    value: {
+      color: colors.success,
+      fontSize: 15,
+      textTransform: 'uppercase',
+    },
+    button: {
+      alignItems: 'center',
+      borderRadius: 999,
+      backgroundColor: colors.success,
+      padding: 14,
+    },
+    buttonText: {
+      color: '#fff',
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    link: {
+      color: colors.accent,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+  });
+}

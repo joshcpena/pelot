@@ -22,6 +22,9 @@ Expo Go cannot apply the Android native Google Maps API key from app config. To
 test Android maps with your key, use a development build such as
 `npx expo run:android` after setting `.env`.
 
+If Android shows only the Google logo and map controls, see
+`docs/android-google-maps.md` for the required Google Cloud API key settings.
+
 Useful checks:
 
 ```sh

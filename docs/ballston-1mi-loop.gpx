@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Pelot" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>Ballston 1 Mile Loop</name>
+    <desc>Approximate 1 mile loop around Ballston in Arlington, Virginia for Android Emulator location playback.</desc>
+  </metadata>
+  <trk>
+    <name>Ballston 1 Mile Loop</name>
+    <trkseg>
+      <trkpt lat="38.881660" lon="-77.111980"><time>2026-05-22T12:00:00Z</time></trkpt>
+      <trkpt lat="38.881650" lon="-77.110960"><time>2026-05-22T12:00:20Z</time></trkpt>
+      <trkpt lat="38.881610" lon="-77.109780"><time>2026-05-22T12:00:40Z</time></trkpt>
+      <trkpt lat="38.881560" lon="-77.108730"><time>2026-05-22T12:01:00Z</time></trkpt>
+      <trkpt lat="38.882230" lon="-77.108690"><time>2026-05-22T12:01:20Z</time></trkpt>
+      <trkpt lat="38.882900" lon="-77.108660"><time>2026-05-22T12:01:40Z</time></trkpt>
+      <trkpt lat="38.883560" lon="-77.108620"><time>2026-05-22T12:02:00Z</time></trkpt>
+      <trkpt lat="38.883590" lon="-77.109650"><time>2026-05-22T12:02:20Z</time></trkpt>
+      <trkpt lat="38.883610" lon="-77.110760"><time>2026-05-22T12:02:40Z</time></trkpt>
+      <trkpt lat="38.883630" lon="-77.111940"><time>2026-05-22T12:03:00Z</time></trkpt>
+      <trkpt lat="38.882970" lon="-77.111950"><time>2026-05-22T12:03:20Z</time></trkpt>
+      <trkpt lat="38.882310" lon="-77.111970"><time>2026-05-22T12:03:40Z</time></trkpt>
+      <trkpt lat="38.881660" lon="-77.111980"><time>2026-05-22T12:04:00Z</time></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

@@ -1,19 +1,33 @@
-import { useEffect, useState } from 'react';
+import {
+  createContext,
+  createElement,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useState,
+} from 'react';
+import { useColorScheme } from 'react-native';
 
 import { getDatabase, initializeDatabase } from '../../lib/database';
+import {
+  defaultDashboardLayout,
+  validateDashboardLayout,
+} from '../ride/dashboard';
 import type { RideSettings } from '../ride/types';
 
 export const defaultRideSettings: RideSettings = {
   unitSystem: 'imperial',
   keepAwakeDuringRide: true,
   autoPause: false,
+  autoLap: true,
   ascentSource: 'barometer-preferred',
   gpsAccuracy: 'best',
-  splitType: 'distance',
+  splitType: 'time',
   splitDistanceMeters: 1609.344,
-  splitDurationSeconds: 300,
+  splitDurationSeconds: 600,
   theme: 'system',
   mapType: 'standard',
+  dashboardLayout: defaultDashboardLayout,
 };
 
 type SettingKey = keyof RideSettings;
@@ -23,20 +37,85 @@ type SettingRow = {
   value: string;
 };
 
+type RideSettingsContextValue = {
+  settings: RideSettings;
+  isLoading: boolean;
+  updateSetting: <K extends SettingKey>(
+    key: K,
+    value: RideSettings[K],
+  ) => Promise<void>;
+};
+
+export type ThemeColors = {
+  background: string;
+  card: string;
+  elevatedCard: string;
+  primaryText: string;
+  secondaryText: string;
+  mutedText: string;
+  border: string;
+  accent: string;
+  accentSoft: string;
+  success: string;
+  danger: string;
+  warning: string;
+  inverseBackground: string;
+  inverseText: string;
+};
+
+const darkColors: ThemeColors = {
+  background: '#0d1117',
+  card: '#161b22',
+  elevatedCard: '#101a2b',
+  primaryText: '#fff',
+  secondaryText: '#c9d1d9',
+  mutedText: '#8b949e',
+  border: '#30363d',
+  accent: '#58a6ff',
+  accentSoft: '#0d1b2f',
+  success: '#238636',
+  danger: '#da3633',
+  warning: '#f2cc60',
+  inverseBackground: '#f0f6fc',
+  inverseText: '#0d1117',
+};
+
+const lightColors: ThemeColors = {
+  background: '#f6f8fa',
+  card: '#ffffff',
+  elevatedCard: '#eef6ff',
+  primaryText: '#0d1117',
+  secondaryText: '#24292f',
+  mutedText: '#57606a',
+  border: '#d0d7de',
+  accent: '#0969da',
+  accentSoft: '#ddf4ff',
+  success: '#1a7f37',
+  danger: '#cf222e',
+  warning: '#9a6700',
+  inverseBackground: '#0d1117',
+  inverseText: '#ffffff',
+};
+
+const RideSettingsContext = createContext<RideSettingsContextValue | null>(
+  null,
+);
+
 function decodeSetting<K extends SettingKey>(
   key: K,
   value: string,
 ): RideSettings[K] {
-  if (
-    key === 'keepAwakeDuringRide' ||
-    key === 'autoPause' ||
-    key === 'splitDistanceMeters' ||
-    key === 'splitDurationSeconds'
-  ) {
-    return JSON.parse(value) as RideSettings[K];
-  }
+  try {
+    const decoded = JSON.parse(value) as RideSettings[K];
 
-  return value as RideSettings[K];
+    if (key === 'dashboardLayout') {
+      return validateDashboardLayout(decoded) as RideSettings[K];
+    }
+
+    return decoded;
+  } catch {
+    return value as RideSettings[K];
+  }
 }
 
 export async function loadRideSettings() {
@@ -70,7 +149,7 @@ export async function saveRideSetting<K extends SettingKey>(
   );
 }
 
-export function useRideSettings() {
+function useLoadedRideSettings(): RideSettingsContextValue {
   const [settings, setSettings] = useState<RideSettings>(defaultRideSettings);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -103,4 +182,31 @@ export function useRideSettings() {
   }
 
   return { settings, isLoading, updateSetting };
+}
+
+export function RideSettingsProvider({ children }: { children: ReactNode }) {
+  const value = useLoadedRideSettings();
+
+  return createElement(RideSettingsContext.Provider, { value }, children);
+}
+
+export function useRideSettings() {
+  const context = useContext(RideSettingsContext);
+
+  if (!context) {
+    throw new Error(
+      'useRideSettings must be used inside RideSettingsProvider.',
+    );
+  }
+
+  return context;
+}
+
+export function useThemeColors() {
+  const { settings } = useRideSettings();
+  const systemColorScheme = useColorScheme();
+  const resolvedTheme =
+    settings.theme === 'system' ? systemColorScheme : settings.theme;
+
+  return resolvedTheme === 'light' ? lightColors : darkColors;
 }
