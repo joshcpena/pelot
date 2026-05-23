@@ -64,6 +64,7 @@ export default function HomeScreen() {
   const [stopFill] = useState(() => new Animated.Value(0));
   const [isEditingDashboard, setIsEditingDashboard] = useState(false);
   const [layoutDraft, setLayoutDraft] = useState(settings.dashboardLayout);
+  const [dashboardHeight, setDashboardHeight] = useState(0);
   const [metricPickerCardId, setMetricPickerCardId] = useState<string | null>(
     null,
   );
@@ -71,6 +72,7 @@ export default function HomeScreen() {
   const isRecording = recorder.status === 'recording';
   const isPaused = recorder.status === 'paused';
   const canStart = recorder.status === 'idle' || recorder.status === 'stopped';
+  const dashboardRowHeight = dashboardHeight > 0 ? dashboardHeight / 10 : 66;
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -213,52 +215,39 @@ export default function HomeScreen() {
           </Pressable>
         </Link>
 
-        <ScrollView style={styles.dashboardScroller}>
-          {isEditingDashboard ? (
-            <View
-              style={[
-                styles.editModeHeader,
-                { paddingTop: Math.max(insets.top + 8, 24) },
-              ]}
-            >
-              <Text style={styles.editModeText}>
-                Drag cards to reorder. Tap a card to change metric or size.
-              </Text>
-              <Pressable
-                style={styles.editModeButton}
-                onPress={() =>
-                  setDashboardLayoutDraft(settings.dashboardLayout)
-                }
-              >
-                <Text style={styles.editModeButtonText}>Reset</Text>
-              </Pressable>
-              <Pressable
-                style={styles.editModeDoneButton}
-                onPress={saveDashboardLayout}
-              >
-                <Text style={styles.editModeDoneButtonText}>Done</Text>
-              </Pressable>
-            </View>
-          ) : null}
-          <DashboardGrid
-            colors={colors}
-            context={{
-              metrics: recorder.metrics,
-              settings,
-              routePoints: recorder.routePoints,
-              plannedRoute,
-              now,
-            }}
-            isEditing={isEditingDashboard}
-            layout={isEditingDashboard ? layoutDraft : settings.dashboardLayout}
-            settings={settings}
-            onAddCard={() => setMetricPickerCardId('new')}
-            onLongPressCard={canStart ? enterDashboardEditMode : undefined}
-            onMoveCard={moveDashboardCard}
-            onPressCard={(card) => setSizePickerCardId(card.id)}
-            onRemoveCard={removeDashboardCard}
-          />
-        </ScrollView>
+        <View
+          style={[styles.dashboardArea, { paddingTop: insets.top }]}
+          onLayout={(event) => {
+            setDashboardHeight(event.nativeEvent.layout.height - insets.top);
+          }}
+        >
+          <ScrollView
+            style={styles.dashboardScroller}
+            scrollEnabled={isEditingDashboard}
+          >
+            <DashboardGrid
+              colors={colors}
+              context={{
+                metrics: recorder.metrics,
+                settings,
+                routePoints: recorder.routePoints,
+                plannedRoute,
+                now,
+              }}
+              isEditing={isEditingDashboard}
+              layout={
+                isEditingDashboard ? layoutDraft : settings.dashboardLayout
+              }
+              rowHeight={dashboardRowHeight}
+              settings={settings}
+              onAddCard={() => setMetricPickerCardId('new')}
+              onLongPressCard={canStart ? enterDashboardEditMode : undefined}
+              onMoveCard={moveDashboardCard}
+              onPressCard={(card) => setSizePickerCardId(card.id)}
+              onRemoveCard={removeDashboardCard}
+            />
+          </ScrollView>
+        </View>
 
         {recorder.isAutoPaused ? (
           <Text style={styles.warning}>Auto-paused</Text>
@@ -283,7 +272,25 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
-        {!isEditingDashboard ? (
+        {isEditingDashboard ? (
+          <View style={styles.editModeControls}>
+            <Text style={styles.editModeText}>
+              Drag to reorder. Tap to customize.
+            </Text>
+            <Pressable
+              style={styles.editModeButton}
+              onPress={() => setDashboardLayoutDraft(settings.dashboardLayout)}
+            >
+              <Text style={styles.editModeButtonText}>Reset</Text>
+            </Pressable>
+            <Pressable
+              style={styles.editModeDoneButton}
+              onPress={saveDashboardLayout}
+            >
+              <Text style={styles.editModeDoneButtonText}>Done</Text>
+            </Pressable>
+          </View>
+        ) : (
           <View style={styles.controls}>
             {canStart ? (
               <Pressable
@@ -331,7 +338,19 @@ export default function HomeScreen() {
                     },
                   ]}
                 />
-                <Text style={styles.stopButtonText}>Hold to stop</Text>
+                <Animated.Text
+                  style={[
+                    styles.stopButtonText,
+                    {
+                      color: stopFill.interpolate({
+                        inputRange: [0, 0.65, 1],
+                        outputRange: [colors.danger, colors.danger, '#fff'],
+                      }),
+                    },
+                  ]}
+                >
+                  Hold to stop
+                </Animated.Text>
               </Pressable>
             ) : null}
             {isPaused ? (
@@ -343,7 +362,7 @@ export default function HomeScreen() {
               </Pressable>
             ) : null}
           </View>
-        ) : null}
+        )}
 
         <StatusBar style={settings.theme === 'light' ? 'dark' : 'light'} />
       </View>
@@ -561,16 +580,20 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       backgroundColor: colors.background,
     },
+    dashboardArea: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
     dashboardScroller: {
       flex: 1,
     },
-    editModeHeader: {
+    editModeControls: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
       backgroundColor: colors.card,
       padding: 8,
-      paddingRight: 58,
+      paddingBottom: 10,
     },
     editModeText: {
       flex: 1,

@@ -30,6 +30,19 @@ type DragState = {
   y: Animated.Value;
 };
 
+function getOverlapArea(a: CardLayout, b: CardLayout) {
+  const xOverlap = Math.max(
+    0,
+    Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x),
+  );
+  const yOverlap = Math.max(
+    0,
+    Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y),
+  );
+
+  return xOverlap * yOverlap;
+}
+
 function getSpanDimensions(span: DashboardCard['span']) {
   const [columns, rows] = span.split('x').map(Number);
 
@@ -41,6 +54,7 @@ export function DashboardGrid({
   context,
   layout,
   settings,
+  rowHeight = 66,
   onLongPressCard,
   isEditing = false,
   onAddCard,
@@ -52,6 +66,7 @@ export function DashboardGrid({
   context: DashboardValueContext;
   layout: DashboardCard[];
   settings: RideSettings;
+  rowHeight?: number;
   onLongPressCard?: (card: DashboardCard) => void;
   isEditing?: boolean;
   onAddCard?: () => void;
@@ -132,24 +147,40 @@ export function DashboardGrid({
 
     const nextX = currentDragState.layout.x + dx;
     const nextY = currentDragState.layout.y + dy;
-    const centerX = nextX + currentDragState.layout.width / 2;
-    const centerY = nextY + currentDragState.layout.height / 2;
+    const draggedLayout = {
+      ...currentDragState.layout,
+      x: nextX,
+      y: nextY,
+    };
 
     currentDragState.x.setValue(nextX);
     currentDragState.y.setValue(nextY);
 
-    const target = layout.find((card) => {
+    const target = layout.reduce<DashboardCard | null>((bestTarget, card) => {
       const cardLayout = cardLayoutsRef.current[card.id];
 
-      return (
-        card.id !== currentDragState.card.id &&
-        cardLayout &&
-        centerX >= cardLayout.x &&
-        centerX <= cardLayout.x + cardLayout.width &&
-        centerY >= cardLayout.y &&
-        centerY <= cardLayout.y + cardLayout.height
-      );
-    });
+      if (card.id === currentDragState.card.id || !cardLayout) {
+        return bestTarget;
+      }
+
+      const overlapArea = getOverlapArea(draggedLayout, cardLayout);
+      const currentBestArea = bestTarget
+        ? getOverlapArea(draggedLayout, cardLayoutsRef.current[bestTarget.id])
+        : 0;
+
+      return overlapArea > currentBestArea ? card : bestTarget;
+    }, null);
+
+    const targetLayout = target ? cardLayoutsRef.current[target.id] : null;
+    const targetOverlapArea = targetLayout
+      ? getOverlapArea(draggedLayout, targetLayout)
+      : 0;
+    const draggedArea = draggedLayout.width * draggedLayout.height;
+
+    if (targetOverlapArea < draggedArea * 0.18) {
+      lastTargetIdRef.current = null;
+      return;
+    }
 
     if (!target) {
       lastTargetIdRef.current = null;
@@ -179,7 +210,7 @@ export function DashboardGrid({
 
     const { columns, rows } = getSpanDimensions(card.span);
     const width = `${(columns / 3) * 100}%` as DimensionValue;
-    const height = rows * (card.metricId === 'map' ? 92 : 66);
+    const height = rows * rowHeight;
     const cardStyle = { width, height };
     const content =
       card.metricId === 'map' ? (
