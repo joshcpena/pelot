@@ -28,6 +28,11 @@ export const defaultRideSettings: RideSettings = {
   theme: 'system',
   mapType: 'standard',
   dashboardLayout: defaultDashboardLayout,
+  connectedHeartRateDevice: null,
+  riderWeightKg: null,
+  riderHeightCm: null,
+  riderAgeYears: null,
+  riderSex: null,
 };
 
 type SettingKey = keyof RideSettings;

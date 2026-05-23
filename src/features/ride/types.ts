@@ -8,6 +8,8 @@ export type SplitType = 'distance' | 'time';
 
 export type RideStatus = 'idle' | 'recording' | 'paused' | 'stopped';
 
+export type RiderSex = 'female' | 'male';
+
 export type RidePoint = {
   recordedAt: number;
   latitude: number;
@@ -26,6 +28,7 @@ export type RideMetrics = {
   pausedSeconds: number;
   distanceMeters: number;
   ascentMeters: number;
+  activeCaloriesKcal: number | null;
   currentSpeedMps: number;
   averageSpeedMps: number;
   maxSpeedMps: number;
@@ -35,8 +38,14 @@ export type RideMetrics = {
   lapMovingSeconds: number;
   lapDistanceMeters: number;
   lapAscentMeters: number;
+  lapActiveCaloriesKcal: number | null;
   lapAverageSpeedMps: number;
   lapMaxSpeedMps: number;
+};
+
+export type HeartRateDevice = {
+  id: string;
+  name: string;
 };
 
 export type DashboardCardSpan =
@@ -120,7 +129,8 @@ export type DashboardMetricId =
   | 'windLapAverage'
   | 'windMax'
   | 'windMin'
-  | 'windLapMin';
+  | 'windLapMin'
+  | 'heartRateCurrent';
 
 export type DashboardCard = {
   id: string;
@@ -153,4 +163,9 @@ export type RideSettings = {
   theme: 'system' | 'light' | 'dark';
   mapType: 'standard' | 'satellite' | 'hybrid';
   dashboardLayout: DashboardCard[];
+  connectedHeartRateDevice: HeartRateDevice | null;
+  riderWeightKg: number | null;
+  riderHeightCm: number | null;
+  riderAgeYears: number | null;
+  riderSex: RiderSex | null;
 };

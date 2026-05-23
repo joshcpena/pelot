@@ -1,5 +1,9 @@
 import { getDatabase, initializeDatabase } from '../../lib/database';
-import { distanceBetweenMeters, positiveElevationGainMeters } from './metrics';
+import {
+  distanceBetweenMeters,
+  positiveElevationGainMeters,
+  withEstimatedCalories,
+} from './metrics';
 import type {
   RideMetrics,
   RidePoint,
@@ -27,6 +31,7 @@ export type RideSummary = {
   movingSeconds: number;
   distanceMeters: number;
   ascentMeters: number;
+  activeCaloriesKcal: number | null;
   averageSpeedMps: number;
   maxSpeedMps: number;
   unitPreference: UnitSystem;
@@ -49,6 +54,7 @@ type RideSummaryRow = {
   moving_seconds: number;
   distance_meters: number;
   ascent_meters: number;
+  active_calories_kcal: number | null;
   average_speed_mps: number;
   max_speed_mps: number;
   unit_preference: UnitSystem;
@@ -206,6 +212,7 @@ export function calculateMetricsFromPoints(points: RidePoint[]): RideMetrics {
     pausedSeconds: 0,
     distanceMeters,
     ascentMeters,
+    activeCaloriesKcal: null,
     currentSpeedMps: points[points.length - 1]?.speedMps ?? 0,
     averageSpeedMps: movingSeconds > 0 ? distanceMeters / movingSeconds : 0,
     maxSpeedMps,
@@ -215,6 +222,7 @@ export function calculateMetricsFromPoints(points: RidePoint[]): RideMetrics {
     lapMovingSeconds: movingSeconds,
     lapDistanceMeters: distanceMeters,
     lapAscentMeters: ascentMeters,
+    lapActiveCaloriesKcal: null,
     lapAverageSpeedMps: movingSeconds > 0 ? distanceMeters / movingSeconds : 0,
     lapMaxSpeedMps: maxSpeedMps,
   };
@@ -316,8 +324,10 @@ export async function finishRide(
   settings: RideSettings,
 ) {
   const points = await loadRidePoints(rideId);
-  const metrics =
-    points.length > 1 ? calculateMetricsFromPoints(points) : fallbackMetrics;
+  const metrics = withEstimatedCalories(
+    points.length > 1 ? calculateMetricsFromPoints(points) : fallbackMetrics,
+    settings,
+  );
   const splits = points.length > 1 ? buildSplits(points, settings) : [];
   const db = await getDatabase();
 
@@ -328,6 +338,7 @@ export async function finishRide(
          moving_seconds = ?,
          distance_meters = ?,
          ascent_meters = ?,
+         active_calories_kcal = ?,
          average_speed_mps = ?,
          max_speed_mps = ?
      WHERE id = ?`,
@@ -336,6 +347,7 @@ export async function finishRide(
     metrics.movingSeconds,
     metrics.distanceMeters,
     metrics.ascentMeters,
+    metrics.activeCaloriesKcal,
     metrics.averageSpeedMps,
     metrics.maxSpeedMps,
     rideId,
@@ -359,6 +371,7 @@ export async function loadRecentRides(limit = 10) {
             moving_seconds,
             distance_meters,
             ascent_meters,
+            active_calories_kcal,
             average_speed_mps,
             max_speed_mps,
             unit_preference
@@ -377,6 +390,7 @@ export async function loadRecentRides(limit = 10) {
     movingSeconds: row.moving_seconds,
     distanceMeters: row.distance_meters,
     ascentMeters: row.ascent_meters,
+    activeCaloriesKcal: row.active_calories_kcal,
     averageSpeedMps: row.average_speed_mps,
     maxSpeedMps: row.max_speed_mps,
     unitPreference: row.unit_preference,

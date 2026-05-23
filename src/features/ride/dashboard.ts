@@ -1,5 +1,6 @@
 import {
   formatAscent,
+  formatCalories,
   formatDistance,
   formatDuration,
   formatPace,
@@ -19,6 +20,7 @@ import type {
 export type DashboardMetricCategory =
   | 'Calories'
   | 'Device'
+  | 'Health'
   | 'Distance'
   | 'Elevation'
   | 'Lap'
@@ -33,6 +35,14 @@ export type DashboardValueContext = {
   routePoints: RidePoint[];
   plannedRoute: PlannedRoute | null;
   now: number | null;
+  heartRateBpm: number | null;
+  heartRateStatus:
+    | 'idle'
+    | 'connecting'
+    | 'connected'
+    | 'unavailable'
+    | 'error';
+  heartRateError: string | null;
 };
 
 export type DashboardMetricDefinition = {
@@ -102,18 +112,22 @@ function createUnavailableMetric(
 }
 
 export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
-  createUnavailableMetric(
-    'caloriesTotal',
-    'Calories Total',
-    'Calories',
-    'Estimate total calories from rider profile, ride duration, speed, and/or heart rate.',
-  ),
-  createUnavailableMetric(
-    'caloriesLap',
-    'Calories Lap',
-    'Calories',
-    'Estimate lap calories after lap energy accounting exists.',
-  ),
+  {
+    id: 'caloriesTotal',
+    label: 'Calories Total',
+    category: 'Calories',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: ({ metrics }) => formatCalories(metrics.activeCaloriesKcal),
+  },
+  {
+    id: 'caloriesLap',
+    label: 'Calories Lap',
+    category: 'Calories',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: ({ metrics }) => formatCalories(metrics.lapActiveCaloriesKcal),
+  },
   createUnavailableMetric(
     'deviceBatteryLevel',
     'Device Battery Level',
@@ -518,6 +532,36 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
     'Weather',
     'Track minimum wind sample during a lap.',
   ),
+  {
+    id: 'heartRateCurrent',
+    label: 'Heart Rate Current',
+    category: 'Health',
+    supportedSpans: metricSpans,
+    defaultSpan: '1.5x2',
+    getValue: ({ heartRateBpm, heartRateStatus, heartRateError, settings }) => {
+      if (!settings.connectedHeartRateDevice) {
+        return 'No device';
+      }
+
+      if (heartRateBpm != null) {
+        return `${heartRateBpm} bpm`;
+      }
+
+      if (heartRateStatus === 'connecting') {
+        return 'Connecting';
+      }
+
+      if (heartRateStatus === 'connected') {
+        return 'Waiting';
+      }
+
+      if (heartRateStatus === 'error') {
+        return heartRateError ? heartRateError.slice(0, 28) : 'Error';
+      }
+
+      return '--';
+    },
+  },
 ];
 
 export const dashboardMetricById = new Map(

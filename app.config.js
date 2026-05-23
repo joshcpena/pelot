@@ -26,6 +26,8 @@ module.exports = {
           'Pelot can use background location to keep recording your ride when the app is not open.',
         NSMotionUsageDescription:
           'Pelot may use device motion and pressure sensors to improve ride metrics such as ascent when available.',
+        NSBluetoothAlwaysUsageDescription:
+          'Pelot uses Bluetooth to connect to heart rate devices such as Garmin watches broadcasting heart rate.',
         UIBackgroundModes: ['location'],
       },
     },
@@ -37,6 +39,10 @@ module.exports = {
         'ACCESS_BACKGROUND_LOCATION',
         'FOREGROUND_SERVICE',
         'FOREGROUND_SERVICE_LOCATION',
+        'BLUETOOTH',
+        'BLUETOOTH_ADMIN',
+        'BLUETOOTH_SCAN',
+        'BLUETOOTH_CONNECT',
       ],
       adaptiveIcon: {
         backgroundColor: '#E6F4FE',

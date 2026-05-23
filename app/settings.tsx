@@ -1,11 +1,13 @@
 import { Link } from 'expo-router';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
@@ -15,6 +17,10 @@ import {
   useThemeColors,
 } from '../src/features/settings/settings';
 import type { RideSettings } from '../src/features/ride/types';
+import {
+  scanHeartRateDevices,
+  type ScannedHeartRateDevice,
+} from '../src/features/devices/heartRateMonitor';
 
 function OptionButton<T extends string>({
   label,
@@ -25,7 +31,7 @@ function OptionButton<T extends string>({
 }: {
   label: string;
   value: T;
-  selectedValue: T;
+  selectedValue: T | null;
   onSelect: (value: T) => void;
   styles: ReturnType<typeof createStyles>;
 }) {
@@ -93,10 +99,30 @@ function Section({
   );
 }
 
+function formatProfileNumber(value: number | null) {
+  if (value == null) {
+    return '';
+  }
+
+  return Number(value.toFixed(1)).toString();
+}
+
+function parsePositiveNumber(value: string) {
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 export default function SettingsScreen() {
   const { settings, isLoading, updateSetting } = useRideSettings();
   const colors = useThemeColors();
   const styles = createStyles(colors);
+  const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [heartRateDevices, setHeartRateDevices] = useState<
+    ScannedHeartRateDevice[]
+  >([]);
 
   function update<K extends keyof RideSettings>(
     key: K,
@@ -108,6 +134,32 @@ export default function SettingsScreen() {
   function updateUnitSystem(unitSystem: RideSettings['unitSystem']) {
     update('unitSystem', unitSystem);
     update('splitDistanceMeters', unitSystem === 'metric' ? 1000 : 1609.344);
+  }
+
+  function updateWeight(value: string) {
+    const parsed = parsePositiveNumber(value);
+
+    update(
+      'riderWeightKg',
+      parsed == null
+        ? null
+        : settings.unitSystem === 'imperial'
+          ? parsed / 2.2046226218
+          : parsed,
+    );
+  }
+
+  function updateHeight(value: string) {
+    const parsed = parsePositiveNumber(value);
+
+    update(
+      'riderHeightCm',
+      parsed == null
+        ? null
+        : settings.unitSystem === 'imperial'
+          ? parsed * 2.54
+          : parsed,
+    );
   }
 
   const distancePresets =
@@ -127,6 +179,28 @@ export default function SettingsScreen() {
     { label: '10 min', value: 600 },
     { label: '20 min', value: 1200 },
   ];
+
+  async function scanForHeartRateDevices() {
+    setScanError(null);
+    setIsScanning(true);
+
+    try {
+      setHeartRateDevices(await scanHeartRateDevices());
+    } catch (error) {
+      setScanError(
+        error instanceof Error
+          ? error.message
+          : 'Could not scan for heart rate devices.',
+      );
+    } finally {
+      setIsScanning(false);
+    }
+  }
+
+  function openDeviceModal() {
+    setIsDeviceModalOpen(true);
+    scanForHeartRateDevices().catch(() => {});
+  }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -151,6 +225,82 @@ export default function SettingsScreen() {
             selectedValue={settings.unitSystem}
             onSelect={updateUnitSystem}
           />
+        </View>
+      </Section>
+
+      <Section title="Rider Profile" styles={styles}>
+        <Text style={styles.muted}>
+          Used for active calorie estimates with cycling MET intensity and
+          Mifflin-St Jeor resting metabolic rate.
+        </Text>
+        <View style={styles.rowWrap}>
+          <OptionButton
+            styles={styles}
+            label="Female"
+            value="female"
+            selectedValue={settings.riderSex}
+            onSelect={(value) => update('riderSex', value)}
+          />
+          <OptionButton
+            styles={styles}
+            label="Male"
+            value="male"
+            selectedValue={settings.riderSex}
+            onSelect={(value) => update('riderSex', value)}
+          />
+        </View>
+        <View style={styles.profileGrid}>
+          <View style={styles.profileField}>
+            <Text style={styles.label}>
+              Weight ({settings.unitSystem === 'imperial' ? 'lb' : 'kg'})
+            </Text>
+            <TextInput
+              keyboardType="decimal-pad"
+              placeholder={settings.unitSystem === 'imperial' ? '175' : '79'}
+              placeholderTextColor={colors.mutedText}
+              style={styles.input}
+              value={formatProfileNumber(
+                settings.riderWeightKg == null
+                  ? null
+                  : settings.unitSystem === 'imperial'
+                    ? settings.riderWeightKg * 2.2046226218
+                    : settings.riderWeightKg,
+              )}
+              onChangeText={updateWeight}
+            />
+          </View>
+          <View style={styles.profileField}>
+            <Text style={styles.label}>
+              Height ({settings.unitSystem === 'imperial' ? 'in' : 'cm'})
+            </Text>
+            <TextInput
+              keyboardType="decimal-pad"
+              placeholder={settings.unitSystem === 'imperial' ? '70' : '178'}
+              placeholderTextColor={colors.mutedText}
+              style={styles.input}
+              value={formatProfileNumber(
+                settings.riderHeightCm == null
+                  ? null
+                  : settings.unitSystem === 'imperial'
+                    ? settings.riderHeightCm / 2.54
+                    : settings.riderHeightCm,
+              )}
+              onChangeText={updateHeight}
+            />
+          </View>
+          <View style={styles.profileField}>
+            <Text style={styles.label}>Age</Text>
+            <TextInput
+              keyboardType="number-pad"
+              placeholder="35"
+              placeholderTextColor={colors.mutedText}
+              style={styles.input}
+              value={settings.riderAgeYears?.toString() ?? ''}
+              onChangeText={(value) =>
+                update('riderAgeYears', parsePositiveNumber(value))
+              }
+            />
+          </View>
         </View>
       </Section>
 
@@ -191,6 +341,32 @@ export default function SettingsScreen() {
             onValueChange={(value) => update('autoLap', value)}
           />
         </View>
+      </Section>
+
+      <Section title="Devices" styles={styles}>
+        <View style={styles.switchRow}>
+          <View style={styles.switchCopy}>
+            <Text style={styles.label}>Heart rate device</Text>
+            <Text style={styles.muted}>
+              {settings.connectedHeartRateDevice
+                ? settings.connectedHeartRateDevice.name
+                : 'No device connected. Enable Broadcast Heart Rate on your Garmin watch first.'}
+            </Text>
+          </View>
+          <Pressable style={styles.deviceButton} onPress={openDeviceModal}>
+            <Text style={styles.deviceButtonText}>Add device</Text>
+          </Pressable>
+        </View>
+        {settings.connectedHeartRateDevice ? (
+          <Pressable
+            style={styles.clearDeviceButton}
+            onPress={() => update('connectedHeartRateDevice', null)}
+          >
+            <Text style={styles.clearDeviceButtonText}>
+              Remove heart rate device
+            </Text>
+          </Pressable>
+        ) : null}
       </Section>
 
       <Section title="Ascent Source" styles={styles}>
@@ -330,6 +506,57 @@ export default function SettingsScreen() {
       <Link href="/" style={styles.link}>
         Back to ride
       </Link>
+
+      <Modal
+        animationType="slide"
+        visible={isDeviceModalOpen}
+        onRequestClose={() => setIsDeviceModalOpen(false)}
+      >
+        <ScrollView
+          style={styles.modal}
+          contentContainerStyle={styles.modalBody}
+        >
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Add Heart Rate Device</Text>
+            <Pressable onPress={() => setIsDeviceModalOpen(false)}>
+              <Text style={styles.modalClose}>Close</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.modalCopy}>
+            On Garmin, enable Broadcast Heart Rate, then scan here. Pelot uses
+            the standard Bluetooth Heart Rate Service.
+          </Text>
+          <Pressable
+            disabled={isScanning}
+            style={[styles.deviceButton, isScanning && styles.disabledButton]}
+            onPress={scanForHeartRateDevices}
+          >
+            <Text style={styles.deviceButtonText}>
+              {isScanning ? 'Scanning...' : 'Scan again'}
+            </Text>
+          </Pressable>
+          {scanError ? <Text style={styles.error}>{scanError}</Text> : null}
+          {heartRateDevices.map((device) => (
+            <Pressable
+              key={device.id}
+              style={styles.deviceRow}
+              onPress={() => {
+                update('connectedHeartRateDevice', device);
+                setIsDeviceModalOpen(false);
+              }}
+            >
+              <View style={styles.switchCopy}>
+                <Text style={styles.label}>{device.name}</Text>
+                <Text style={styles.muted}>{device.id}</Text>
+              </View>
+              <Text style={styles.chevron}>›</Text>
+            </Pressable>
+          ))}
+          {!isScanning && heartRateDevices.length === 0 ? (
+            <Text style={styles.muted}>No heart rate devices found yet.</Text>
+          ) : null}
+        </ScrollView>
+      </Modal>
     </ScrollView>
   );
 }
@@ -379,6 +606,23 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       gap: 3,
     },
+    profileGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 10,
+    },
+    profileField: {
+      minWidth: '30%',
+      flex: 1,
+      gap: 6,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      color: colors.primaryText,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
     label: {
       color: colors.primaryText,
       fontSize: 15,
@@ -405,6 +649,82 @@ function createStyles(colors: ThemeColors) {
     },
     optionButtonTextSelected: {
       color: '#fff',
+    },
+    deviceButton: {
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.accent,
+      backgroundColor: colors.accentSoft,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    deviceButtonText: {
+      color: colors.accent,
+      fontWeight: '900',
+    },
+    clearDeviceButton: {
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.danger,
+      backgroundColor: colors.dangerSoft,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    clearDeviceButtonText: {
+      color: colors.danger,
+      fontWeight: '900',
+    },
+    disabledButton: {
+      opacity: 0.55,
+    },
+    modal: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    modalBody: {
+      gap: 12,
+      padding: 16,
+      paddingTop: 56,
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    modalTitle: {
+      flex: 1,
+      color: colors.primaryText,
+      fontSize: 24,
+      fontWeight: '900',
+    },
+    modalClose: {
+      color: colors.accent,
+      fontSize: 16,
+      fontWeight: '900',
+    },
+    modalCopy: {
+      color: colors.mutedText,
+      fontSize: 14,
+      lineHeight: 20,
+    },
+    error: {
+      color: colors.danger,
+      fontWeight: '800',
+    },
+    deviceRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: 12,
+    },
+    chevron: {
+      color: colors.accent,
+      fontSize: 28,
     },
     link: {
       color: colors.accent,

@@ -1,16 +1,21 @@
 import { useEffect, useState } from 'react';
 import * as Location from 'expo-location';
 import { Link } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   type ThemeColors,
   useThemeColors,
 } from '../src/features/settings/settings';
+import {
+  requestHeartRateBluetoothAccess,
+  type BluetoothAccessState,
+} from '../src/features/devices/heartRateMonitor';
 
 type PermissionState = {
   foreground: Location.PermissionStatus | 'unknown';
   background: Location.PermissionStatus | 'unknown';
+  bluetooth: BluetoothAccessState | 'unknown';
 };
 
 export default function PermissionsScreen() {
@@ -19,6 +24,7 @@ export default function PermissionsScreen() {
   const [permissions, setPermissions] = useState<PermissionState>({
     foreground: 'unknown',
     background: 'unknown',
+    bluetooth: 'unknown',
   });
 
   async function refreshPermissions() {
@@ -27,7 +33,17 @@ export default function PermissionsScreen() {
     setPermissions({
       foreground: foreground.status,
       background: background.status,
+      bluetooth: permissions.bluetooth,
     });
+  }
+
+  async function requestBluetooth() {
+    const bluetooth = await requestHeartRateBluetoothAccess();
+    setPermissions((current) => ({ ...current, bluetooth }));
+
+    if (bluetooth === 'denied') {
+      await Linking.openSettings();
+    }
   }
 
   async function requestForeground() {
@@ -51,6 +67,7 @@ export default function PermissionsScreen() {
         setPermissions({
           foreground: foreground.status,
           background: background.status,
+          bluetooth: 'unknown',
         });
       }
     });
@@ -82,6 +99,17 @@ export default function PermissionsScreen() {
         <Text style={styles.value}>{permissions.background}</Text>
         <Pressable style={styles.button} onPress={requestBackground}>
           <Text style={styles.buttonText}>Allow background recording</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.label}>Bluetooth heart rate</Text>
+        <Text style={styles.value}>{permissions.bluetooth}</Text>
+        <Text style={styles.muted}>
+          Needed to connect to Garmin watches broadcasting heart rate.
+        </Text>
+        <Pressable style={styles.button} onPress={requestBluetooth}>
+          <Text style={styles.buttonText}>Allow Bluetooth</Text>
         </Pressable>
       </View>
 
@@ -126,6 +154,11 @@ function createStyles(colors: ThemeColors) {
       color: colors.success,
       fontSize: 15,
       textTransform: 'uppercase',
+    },
+    muted: {
+      color: colors.mutedText,
+      fontSize: 13,
+      lineHeight: 18,
     },
     button: {
       alignItems: 'center',

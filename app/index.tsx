@@ -36,10 +36,12 @@ import type {
   PlannedRoute,
 } from '../src/features/ride/types';
 import { useForegroundRideRecorder } from '../src/features/ride/useForegroundRideRecorder';
+import { useHeartRateMonitor } from '../src/features/devices/heartRateMonitor';
 
 const metricCategories: DashboardMetricCategory[] = [
   'Calories',
   'Device',
+  'Health',
   'Distance',
   'Elevation',
   'Lap',
@@ -73,6 +75,16 @@ export default function HomeScreen() {
   const isPaused = recorder.status === 'paused';
   const canStart = recorder.status === 'idle' || recorder.status === 'stopped';
   const dashboardRowHeight = dashboardHeight > 0 ? dashboardHeight / 10 : 66;
+  const displayedLayout = isEditingDashboard
+    ? layoutDraft
+    : settings.dashboardLayout;
+  const shouldConnectHeartRate = displayedLayout.some(
+    (card) => card.metricId === 'heartRateCurrent',
+  );
+  const heartRate = useHeartRateMonitor(
+    settings.connectedHeartRateDevice,
+    shouldConnectHeartRate,
+  );
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -233,11 +245,12 @@ export default function HomeScreen() {
                 routePoints: recorder.routePoints,
                 plannedRoute,
                 now,
+                heartRateBpm: heartRate.heartRateBpm,
+                heartRateStatus: heartRate.status,
+                heartRateError: heartRate.error,
               }}
               isEditing={isEditingDashboard}
-              layout={
-                isEditingDashboard ? layoutDraft : settings.dashboardLayout
-              }
+              layout={displayedLayout}
               rowHeight={dashboardRowHeight}
               settings={settings}
               onAddCard={() => setMetricPickerCardId('new')}

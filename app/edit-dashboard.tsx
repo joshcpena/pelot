@@ -33,6 +33,7 @@ import type {
 const categories: DashboardMetricCategory[] = [
   'Calories',
   'Device',
+  'Health',
   'Distance',
   'Elevation',
   'Lap',

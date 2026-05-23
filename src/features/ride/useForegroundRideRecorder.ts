@@ -8,7 +8,11 @@ import {
   startBackgroundRideRecording,
   stopBackgroundRideRecording,
 } from './backgroundLocation';
-import { distanceBetweenMeters, positiveElevationGainMeters } from './metrics';
+import {
+  distanceBetweenMeters,
+  positiveElevationGainMeters,
+  withEstimatedCalories,
+} from './metrics';
 import {
   createRide,
   createRideId,
@@ -28,6 +32,7 @@ const initialMetrics: RideMetrics = {
   pausedSeconds: 0,
   distanceMeters: 0,
   ascentMeters: 0,
+  activeCaloriesKcal: null,
   currentSpeedMps: 0,
   averageSpeedMps: 0,
   maxSpeedMps: 0,
@@ -37,6 +42,7 @@ const initialMetrics: RideMetrics = {
   lapMovingSeconds: 0,
   lapDistanceMeters: 0,
   lapAscentMeters: 0,
+  lapActiveCaloriesKcal: null,
   lapAverageSpeedMps: 0,
   lapMaxSpeedMps: 0,
 };
@@ -103,17 +109,23 @@ export function useForegroundRideRecorder(settings: RideSettings) {
   function markLap() {
     const now = Date.now();
 
-    updateMetrics({
-      ...metricsRef.current,
-      lapNumber: metricsRef.current.lapNumber + 1,
-      lapStartedAt: now,
-      lapElapsedSeconds: 0,
-      lapMovingSeconds: 0,
-      lapDistanceMeters: 0,
-      lapAscentMeters: 0,
-      lapAverageSpeedMps: 0,
-      lapMaxSpeedMps: 0,
-    });
+    updateMetrics(
+      withEstimatedCalories(
+        {
+          ...metricsRef.current,
+          lapNumber: metricsRef.current.lapNumber + 1,
+          lapStartedAt: now,
+          lapElapsedSeconds: 0,
+          lapMovingSeconds: 0,
+          lapDistanceMeters: 0,
+          lapAscentMeters: 0,
+          lapActiveCaloriesKcal: null,
+          lapAverageSpeedMps: 0,
+          lapMaxSpeedMps: 0,
+        },
+        settings,
+      ),
+    );
   }
 
   function accumulatePausedTime() {
@@ -297,20 +309,25 @@ export function useForegroundRideRecorder(settings: RideSettings) {
         previousPointRef.current = point;
         setRoutePoints((current) => [...current, point]);
 
-        updateMetrics({
-          ...metricsRef.current,
-          movingSeconds,
-          distanceMeters: nextDistanceMeters,
-          ascentMeters,
-          currentSpeedMps,
-          averageSpeedMps,
-          maxSpeedMps,
-          lapMovingSeconds,
-          lapDistanceMeters,
-          lapAscentMeters,
-          lapAverageSpeedMps,
-          lapMaxSpeedMps,
-        });
+        updateMetrics(
+          withEstimatedCalories(
+            {
+              ...metricsRef.current,
+              movingSeconds,
+              distanceMeters: nextDistanceMeters,
+              ascentMeters,
+              currentSpeedMps,
+              averageSpeedMps,
+              maxSpeedMps,
+              lapMovingSeconds,
+              lapDistanceMeters,
+              lapAscentMeters,
+              lapAverageSpeedMps,
+              lapMaxSpeedMps,
+            },
+            settings,
+          ),
+        );
 
         if (
           settings.autoLap &&
@@ -346,11 +363,16 @@ export function useForegroundRideRecorder(settings: RideSettings) {
     previousPointRef.current = null;
     pausedStartedAtRef.current = null;
     accumulatedElapsedSecondsRef.current = 0;
-    updateMetrics({
-      ...initialMetrics,
-      startedAt: Date.now(),
-      lapStartedAt: Date.now(),
-    });
+    updateMetrics(
+      withEstimatedCalories(
+        {
+          ...initialMetrics,
+          startedAt: Date.now(),
+          lapStartedAt: Date.now(),
+        },
+        settings,
+      ),
+    );
     setRoutePoints([]);
     setIsAutoPaused(false);
     setRideStatus('recording');
@@ -416,10 +438,13 @@ export function useForegroundRideRecorder(settings: RideSettings) {
     stopWatchingBarometer();
     await stopBackgroundRideRecording();
     await deactivateKeepAwake(KEEP_AWAKE_TAG);
-    const finalMetrics = {
-      ...metricsRef.current,
-      elapsedSeconds: accumulatedElapsedSecondsRef.current,
-    };
+    const finalMetrics = withEstimatedCalories(
+      {
+        ...metricsRef.current,
+        elapsedSeconds: accumulatedElapsedSecondsRef.current,
+      },
+      settings,
+    );
     updateMetrics(finalMetrics);
 
     if (rideIdRef.current) {

@@ -1,6 +1,7 @@
-import type { RidePoint } from './types';
+import type { RideMetrics, RidePoint, RideSettings } from './types';
 
 const EARTH_RADIUS_METERS = 6_371_000;
+const METERS_PER_SECOND_TO_MILES_PER_HOUR = 2.236936;
 
 function toRadians(degrees: number) {
   return (degrees * Math.PI) / 180;
@@ -91,6 +92,101 @@ export function formatAscent(
   }
 
   return `${Math.round(meters * 3.28084)} ft`;
+}
+
+export function getCyclingMet(averageSpeedMps: number) {
+  const mph = averageSpeedMps * METERS_PER_SECOND_TO_MILES_PER_HOUR;
+
+  if (mph < 10) {
+    return 4;
+  }
+
+  if (mph < 12) {
+    return 6.8;
+  }
+
+  if (mph < 14) {
+    return 8;
+  }
+
+  if (mph < 16) {
+    return 10;
+  }
+
+  if (mph < 20) {
+    return 12;
+  }
+
+  return 16.8;
+}
+
+function getMifflinStJeorRmrKcalPerDay(settings: RideSettings) {
+  if (
+    settings.riderWeightKg == null ||
+    settings.riderHeightCm == null ||
+    settings.riderAgeYears == null ||
+    settings.riderSex == null
+  ) {
+    return null;
+  }
+
+  const sexOffset = settings.riderSex === 'male' ? 5 : -161;
+
+  return (
+    10 * settings.riderWeightKg +
+    6.25 * settings.riderHeightCm -
+    5 * settings.riderAgeYears +
+    sexOffset
+  );
+}
+
+export function estimateActiveCyclingCaloriesKcal(
+  movingSeconds: number,
+  averageSpeedMps: number,
+  settings: RideSettings,
+) {
+  if (movingSeconds <= 0) {
+    return 0;
+  }
+
+  const rmrKcalPerDay = getMifflinStJeorRmrKcalPerDay(settings);
+
+  if (rmrKcalPerDay == null) {
+    return null;
+  }
+
+  const met = getCyclingMet(averageSpeedMps);
+  const rmrKcalPerMinute = rmrKcalPerDay / 1440;
+  const movingMinutes = movingSeconds / 60;
+
+  return Math.max(0, met - 1) * rmrKcalPerMinute * movingMinutes;
+}
+
+export function withEstimatedCalories(
+  metrics: RideMetrics,
+  settings: RideSettings,
+): RideMetrics {
+  return {
+    ...metrics,
+    activeCaloriesKcal: estimateActiveCyclingCaloriesKcal(
+      metrics.movingSeconds,
+      metrics.averageSpeedMps,
+      settings,
+    ),
+    lapActiveCaloriesKcal: estimateActiveCyclingCaloriesKcal(
+      metrics.lapMovingSeconds,
+      metrics.lapAverageSpeedMps,
+      settings,
+    ),
+  };
+}
+
+export function formatCalories(kcal: number | null) {
+  if (kcal == null) {
+    return '--';
+  }
+
+  return `${Math.round(kcal)} kcal`;
 }
 
 export function formatTimeOfDay(timestamp: number | null) {

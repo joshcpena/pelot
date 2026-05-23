@@ -4,6 +4,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
   formatAscent,
+  formatCalories,
   formatDistance,
   formatDuration,
   formatSpeed,
@@ -15,10 +16,13 @@ import {
 } from '../src/features/settings/settings';
 import {
   loadRecentRides,
+  loadRidePoints,
   loadRideSplits,
   type RideSplit,
   type RideSummary,
 } from '../src/features/ride/rideStorage';
+import { HistoryRouteMap } from '../src/features/ride/HistoryRouteMap';
+import type { RidePoint } from '../src/features/ride/types';
 
 export default function HistoryScreen() {
   const { settings } = useRideSettings();
@@ -27,6 +31,9 @@ export default function HistoryScreen() {
   const [rides, setRides] = useState<RideSummary[]>([]);
   const [splitsByRideId, setSplitsByRideId] = useState<
     Record<string, RideSplit[]>
+  >({});
+  const [pointsByRideId, setPointsByRideId] = useState<
+    Record<string, RidePoint[]>
   >({});
   const [isLoading, setIsLoading] = useState(true);
 
@@ -40,8 +47,17 @@ export default function HistoryScreen() {
           async (ride) => [ride.id, await loadRideSplits(ride.id)] as const,
         ),
       );
+      const pointEntries = await Promise.all(
+        recentRides.map(
+          async (ride) => [ride.id, await loadRidePoints(ride.id)] as const,
+        ),
+      );
 
-      return { recentRides, splitsByRideId: Object.fromEntries(splitEntries) };
+      return {
+        recentRides,
+        splitsByRideId: Object.fromEntries(splitEntries),
+        pointsByRideId: Object.fromEntries(pointEntries),
+      };
     }
 
     loadHistory()
@@ -49,6 +65,7 @@ export default function HistoryScreen() {
         if (isMounted) {
           setRides(history.recentRides);
           setSplitsByRideId(history.splitsByRideId);
+          setPointsByRideId(history.pointsByRideId);
         }
       })
       .finally(() => {
@@ -85,6 +102,7 @@ export default function HistoryScreen() {
           <Text style={styles.date}>
             {new Date(ride.startedAt).toLocaleString()}
           </Text>
+          <HistoryRouteMap points={pointsByRideId[ride.id] ?? []} />
           <View style={styles.grid}>
             <SummaryMetric
               styles={styles}
@@ -115,6 +133,11 @@ export default function HistoryScreen() {
               styles={styles}
               label="Moving"
               value={formatDuration(ride.movingSeconds)}
+            />
+            <SummaryMetric
+              styles={styles}
+              label="Calories"
+              value={formatCalories(ride.activeCaloriesKcal)}
             />
           </View>
           <View style={styles.splits}>
