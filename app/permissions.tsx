@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import * as Location from 'expo-location';
-import { Link } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
@@ -19,6 +19,7 @@ type PermissionState = {
 };
 
 export default function PermissionsScreen() {
+  const router = useRouter();
   const colors = useThemeColors();
   const styles = createStyles(colors);
   const [permissions, setPermissions] = useState<PermissionState>({
@@ -81,16 +82,16 @@ export default function PermissionsScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Permissions</Text>
-        <Link dismissTo href="/" asChild>
-          <Pressable
-            style={({ pressed }) => [
-              styles.backToRideButton,
-              pressed && styles.subtleButtonPressed,
-            ]}
-          >
-            <Text style={styles.backToRideButtonText}>Back to ride</Text>
-          </Pressable>
-        </Link>
+        <Pressable
+          accessibilityRole="button"
+          style={({ pressed }) => [
+            styles.backToRideButton,
+            pressed && styles.subtleButtonPressed,
+          ]}
+          onPress={() => router.dismissTo('/')}
+        >
+          <Text style={styles.backToRideButtonText}>Back to ride</Text>
+        </Pressable>
       </View>
       <Text style={styles.copy}>
         Pelot needs location permission to record speed, distance, and route

@@ -1,4 +1,4 @@
-import { Link } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import {
   Modal,
@@ -137,6 +137,7 @@ function getRouteProfileLabel(routeProfile: RideSettings['routeProfile']) {
 }
 
 export default function SettingsScreen() {
+  const router = useRouter();
   const { settings, isLoading, updateSetting } = useRideSettings();
   const colors = useThemeColors();
   const styles = createStyles(colors);
@@ -250,16 +251,16 @@ export default function SettingsScreen() {
             Keep the ride screen focused and tune everything else here.
           </Text>
         </View>
-        <Link dismissTo href="/" asChild>
-          <Pressable
-            style={({ pressed }) => [
-              styles.backToRideButton,
-              pressed && styles.subtleButtonPressed,
-            ]}
-          >
-            <Text style={styles.backToRideButtonText}>Back to ride</Text>
-          </Pressable>
-        </Link>
+        <Pressable
+          accessibilityRole="button"
+          style={({ pressed }) => [
+            styles.backToRideButton,
+            pressed && styles.subtleButtonPressed,
+          ]}
+          onPress={() => router.dismissTo('/')}
+        >
+          <Text style={styles.backToRideButtonText}>Back to ride</Text>
+        </Pressable>
       </View>
       {isLoading ? (
         <Text style={styles.muted}>Loading saved preferences...</Text>

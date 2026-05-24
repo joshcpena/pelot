@@ -29,6 +29,27 @@ use a development build such as `npx expo run:android` after setting `.env`.
 
 See `docs/maplibre-services.md` for map, search, and routing setup notes.
 
+## Local Android APK
+
+Build an installable APK locally with EAS:
+
+```sh
+npm run build:android:local
+```
+
+This script loads `.env` before bundling so `EXPO_PUBLIC_MAPTILER_API_KEY` and
+`EXPO_PUBLIC_OPENROUTESERVICE_API_KEY` are included in the APK. It also defaults
+`ANDROID_HOME` and `ANDROID_SDK_ROOT` to `$HOME/Library/Android/sdk` when those
+variables are not already set.
+
+When the build finishes, EAS writes an APK like `build-*.apk` in the project
+root. Install it on a USB-connected Android phone with debugging enabled:
+
+```sh
+adb devices
+adb install -r ./build-*.apk
+```
+
 Useful checks:
 
 ```sh

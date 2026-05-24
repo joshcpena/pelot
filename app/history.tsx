@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'expo-router';
+import { useRouter } from 'expo-router';
 import {
   Alert,
   Pressable,
@@ -33,6 +33,7 @@ import { HistoryRouteMap } from '../src/features/ride/HistoryRouteMap';
 import type { RidePoint } from '../src/features/ride/types';
 
 export default function HistoryScreen() {
+  const router = useRouter();
   const { settings } = useRideSettings();
   const colors = useThemeColors();
   const styles = createStyles(colors);
@@ -134,16 +135,16 @@ export default function HistoryScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <Text style={styles.title}>Ride History</Text>
-        <Link dismissTo href="/" asChild>
-          <Pressable
-            style={({ pressed }) => [
-              styles.backToRideButton,
-              pressed && styles.linkPressed,
-            ]}
-          >
-            <Text style={styles.backToRideButtonText}>Back to ride</Text>
-          </Pressable>
-        </Link>
+        <Pressable
+          accessibilityRole="button"
+          style={({ pressed }) => [
+            styles.backToRideButton,
+            pressed && styles.linkPressed,
+          ]}
+          onPress={() => router.dismissTo('/')}
+        >
+          <Text style={styles.backToRideButtonText}>Back to ride</Text>
+        </Pressable>
       </View>
 
       {isLoading ? (
