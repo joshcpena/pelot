@@ -84,16 +84,23 @@ function ValueButton({
 
 function Section({
   title,
+  subtitle,
   children,
   styles,
 }: {
   title: string;
+  subtitle?: string;
   children: ReactNode;
   styles: ReturnType<typeof createStyles>;
 }) {
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>{title}</Text>
+        {subtitle ? (
+          <Text style={styles.sectionSubtitle}>{subtitle}</Text>
+        ) : null}
+      </View>
       {children}
     </View>
   );
@@ -204,12 +211,49 @@ export default function SettingsScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>Settings</Text>
+      <View style={styles.header}>
+        <View style={styles.headerCopy}>
+          <Text style={styles.kicker}>Preferences</Text>
+          <Text style={styles.title}>Settings</Text>
+          <Text style={styles.subtitle}>
+            Keep the ride screen focused and tune everything else here.
+          </Text>
+        </View>
+        <Link dismissTo href="/" style={styles.headerLink}>
+          Back to ride
+        </Link>
+      </View>
       {isLoading ? (
         <Text style={styles.muted}>Loading saved preferences...</Text>
       ) : null}
 
-      <Section title="Units" styles={styles}>
+      <View style={styles.statusCard}>
+        <View style={styles.statusItem}>
+          <Text style={styles.statusLabel}>Units</Text>
+          <Text style={styles.statusValue}>
+            {settings.unitSystem === 'imperial' ? 'Miles' : 'Kilometers'}
+          </Text>
+        </View>
+        <View style={styles.statusDivider} />
+        <View style={styles.statusItem}>
+          <Text style={styles.statusLabel}>Splits</Text>
+          <Text style={styles.statusValue}>
+            {settings.splitType === 'distance' ? 'Distance' : 'Time'}
+          </Text>
+        </View>
+        <View style={styles.statusDivider} />
+        <View style={styles.statusItem}>
+          <Text style={styles.statusLabel}>Map</Text>
+          <Text style={styles.statusValue}>{settings.mapType}</Text>
+        </View>
+      </View>
+
+      <Section
+        title="Essentials"
+        subtitle="The choices you are most likely to change."
+        styles={styles}
+      >
+        <Text style={styles.label}>Units</Text>
         <View style={styles.rowWrap}>
           <OptionButton
             styles={styles}
@@ -226,9 +270,38 @@ export default function SettingsScreen() {
             onSelect={updateUnitSystem}
           />
         </View>
+        <View style={styles.divider} />
+        <Text style={styles.label}>Theme</Text>
+        <View style={styles.rowWrap}>
+          <OptionButton
+            styles={styles}
+            label="System"
+            value="system"
+            selectedValue={settings.theme}
+            onSelect={(value) => update('theme', value)}
+          />
+          <OptionButton
+            styles={styles}
+            label="Light"
+            value="light"
+            selectedValue={settings.theme}
+            onSelect={(value) => update('theme', value)}
+          />
+          <OptionButton
+            styles={styles}
+            label="Dark"
+            value="dark"
+            selectedValue={settings.theme}
+            onSelect={(value) => update('theme', value)}
+          />
+        </View>
       </Section>
 
-      <Section title="Rider Profile" styles={styles}>
+      <Section
+        title="Rider Profile"
+        subtitle="Optional details improve calorie estimates."
+        styles={styles}
+      >
         <Text style={styles.muted}>
           Used for active calorie estimates with cycling MET intensity and
           Mifflin-St Jeor resting metabolic rate.
@@ -304,7 +377,11 @@ export default function SettingsScreen() {
         </View>
       </Section>
 
-      <Section title="Ride Behavior" styles={styles}>
+      <Section
+        title="Ride Behavior"
+        subtitle="Recording defaults for every ride."
+        styles={styles}
+      >
         <View style={styles.switchRow}>
           <View style={styles.switchCopy}>
             <Text style={styles.label}>Keep screen awake</Text>
@@ -343,7 +420,11 @@ export default function SettingsScreen() {
         </View>
       </Section>
 
-      <Section title="Devices" styles={styles}>
+      <Section
+        title="Devices"
+        subtitle="Connect sensors that can enrich the dashboard."
+        styles={styles}
+      >
         <View style={styles.switchRow}>
           <View style={styles.switchCopy}>
             <Text style={styles.label}>Heart rate device</Text>
@@ -369,7 +450,12 @@ export default function SettingsScreen() {
         ) : null}
       </Section>
 
-      <Section title="Ascent Source" styles={styles}>
+      <Section
+        title="GPS & Elevation"
+        subtitle="Favor precision or battery life as needed."
+        styles={styles}
+      >
+        <Text style={styles.label}>Ascent source</Text>
         <View style={styles.rowWrap}>
           <OptionButton
             styles={styles}
@@ -386,9 +472,8 @@ export default function SettingsScreen() {
             onSelect={(value) => update('ascentSource', value)}
           />
         </View>
-      </Section>
-
-      <Section title="GPS" styles={styles}>
+        <View style={styles.divider} />
+        <Text style={styles.label}>GPS accuracy</Text>
         <View style={styles.rowWrap}>
           <OptionButton
             styles={styles}
@@ -407,7 +492,11 @@ export default function SettingsScreen() {
         </View>
       </Section>
 
-      <Section title="Splits" styles={styles}>
+      <Section
+        title="Splits"
+        subtitle="Choose automatic lap markers."
+        styles={styles}
+      >
         <View style={styles.rowWrap}>
           <OptionButton
             styles={styles}
@@ -454,30 +543,11 @@ export default function SettingsScreen() {
         </Text>
       </Section>
 
-      <Section title="Display" styles={styles}>
-        <View style={styles.rowWrap}>
-          <OptionButton
-            styles={styles}
-            label="System"
-            value="system"
-            selectedValue={settings.theme}
-            onSelect={(value) => update('theme', value)}
-          />
-          <OptionButton
-            styles={styles}
-            label="Light"
-            value="light"
-            selectedValue={settings.theme}
-            onSelect={(value) => update('theme', value)}
-          />
-          <OptionButton
-            styles={styles}
-            label="Dark"
-            value="dark"
-            selectedValue={settings.theme}
-            onSelect={(value) => update('theme', value)}
-          />
-        </View>
+      <Section
+        title="Map Display"
+        subtitle="Pick the base map used while riding."
+        styles={styles}
+      >
         <View style={styles.rowWrap}>
           <OptionButton
             styles={styles}
@@ -502,10 +572,6 @@ export default function SettingsScreen() {
           />
         </View>
       </Section>
-
-      <Link href="/" style={styles.link}>
-        Back to ride
-      </Link>
 
       <Modal
         animationType="slide"
@@ -568,28 +634,105 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.background,
     },
     content: {
-      gap: 0,
-      paddingTop: 48,
-      paddingBottom: 24,
+      gap: 16,
+      paddingHorizontal: 16,
+      paddingTop: 58,
+      paddingBottom: 32,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: 16,
+      paddingHorizontal: 4,
+      paddingBottom: 4,
+    },
+    headerCopy: {
+      flex: 1,
+    },
+    kicker: {
+      color: colors.success,
+      fontSize: 12,
+      fontWeight: '900',
+      letterSpacing: 1.1,
+      textTransform: 'uppercase',
     },
     title: {
       color: colors.primaryText,
-      fontSize: 30,
+      fontSize: 38,
+      fontWeight: '900',
+      letterSpacing: -0.9,
+    },
+    subtitle: {
+      marginTop: 4,
+      color: colors.mutedText,
+      fontSize: 15,
+      lineHeight: 21,
+    },
+    headerLink: {
+      color: colors.accent,
+      fontSize: 17,
+      fontWeight: '900',
+      paddingTop: 4,
+    },
+    statusCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 24,
+      backgroundColor: colors.elevatedCard,
+      padding: 14,
+    },
+    statusItem: {
+      flex: 1,
+      gap: 3,
+    },
+    statusLabel: {
+      color: colors.mutedText,
+      fontSize: 11,
       fontWeight: '800',
-      paddingHorizontal: 12,
-      paddingBottom: 12,
+      letterSpacing: 0.8,
+      textTransform: 'uppercase',
+    },
+    statusValue: {
+      color: colors.primaryText,
+      fontSize: 16,
+      fontWeight: '900',
+      textTransform: 'capitalize',
+    },
+    statusDivider: {
+      width: 1,
+      height: 34,
+      marginHorizontal: 10,
+      backgroundColor: colors.border,
     },
     section: {
-      gap: 8,
+      gap: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 24,
       backgroundColor: colors.card,
-      padding: 12,
+      padding: 16,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.06,
+      shadowRadius: 16,
+    },
+    sectionHeader: {
+      gap: 4,
+      paddingBottom: 2,
     },
     sectionTitle: {
       color: colors.primaryText,
-      fontSize: 16,
-      fontWeight: '800',
-      letterSpacing: 0.4,
-      textTransform: 'uppercase',
+      fontSize: 22,
+      fontWeight: '900',
+      letterSpacing: -0.3,
+    },
+    sectionSubtitle: {
+      color: colors.mutedText,
+      fontSize: 13,
+      lineHeight: 18,
     },
     rowWrap: {
       flexDirection: 'row',
@@ -601,6 +744,9 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: 10,
+      borderRadius: 18,
+      backgroundColor: colors.background,
+      padding: 12,
     },
     switchCopy: {
       flex: 1,
@@ -619,25 +765,31 @@ function createStyles(colors: ThemeColors) {
     input: {
       borderWidth: 1,
       borderColor: colors.border,
+      borderRadius: 14,
+      backgroundColor: colors.background,
       color: colors.primaryText,
-      paddingHorizontal: 10,
-      paddingVertical: 8,
+      fontSize: 16,
+      fontWeight: '700',
+      paddingHorizontal: 12,
+      paddingVertical: 11,
     },
     label: {
       color: colors.primaryText,
       fontSize: 15,
-      fontWeight: '700',
+      fontWeight: '800',
     },
     muted: {
       color: colors.mutedText,
-      fontSize: 12,
-      lineHeight: 17,
+      fontSize: 13,
+      lineHeight: 18,
     },
     optionButton: {
       borderWidth: 1,
       borderColor: colors.border,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
+      borderRadius: 999,
+      backgroundColor: colors.background,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
     },
     optionButtonSelected: {
       borderColor: colors.accent,
@@ -645,7 +797,7 @@ function createStyles(colors: ThemeColors) {
     },
     optionButtonText: {
       color: colors.secondaryText,
-      fontWeight: '700',
+      fontWeight: '800',
     },
     optionButtonTextSelected: {
       color: '#fff',
@@ -654,9 +806,10 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       borderWidth: 1,
       borderColor: colors.accent,
+      borderRadius: 999,
       backgroundColor: colors.accentSoft,
       paddingHorizontal: 12,
-      paddingVertical: 8,
+      paddingVertical: 10,
     },
     deviceButtonText: {
       color: colors.accent,
@@ -666,9 +819,10 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       borderWidth: 1,
       borderColor: colors.danger,
+      borderRadius: 999,
       backgroundColor: colors.dangerSoft,
       paddingHorizontal: 12,
-      paddingVertical: 8,
+      paddingVertical: 10,
     },
     clearDeviceButtonText: {
       color: colors.danger,
@@ -719,6 +873,7 @@ function createStyles(colors: ThemeColors) {
       gap: 12,
       borderWidth: 1,
       borderColor: colors.border,
+      borderRadius: 18,
       backgroundColor: colors.card,
       padding: 12,
     },
@@ -728,11 +883,15 @@ function createStyles(colors: ThemeColors) {
     },
     link: {
       color: colors.accent,
-      fontSize: 15,
-      fontWeight: '700',
-      paddingHorizontal: 12,
-      paddingTop: 14,
-      paddingBottom: 24,
+      fontSize: 16,
+      fontWeight: '900',
+      paddingHorizontal: 4,
+      paddingTop: 4,
+      paddingBottom: 8,
+    },
+    divider: {
+      height: 1,
+      backgroundColor: colors.border,
     },
   });
 }

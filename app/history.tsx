@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'expo-router';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import {
   formatAscent,
@@ -127,7 +134,7 @@ export default function HistoryScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <Text style={styles.title}>Ride History</Text>
-        <Link href="/" style={styles.link}>
+        <Link dismissTo href="/" style={styles.link}>
           Back to ride
         </Link>
       </View>
@@ -250,13 +257,18 @@ function createStyles(colors: ThemeColors) {
     },
     content: {
       gap: 18,
-      padding: 24,
-      paddingTop: 72,
+      paddingHorizontal: 20,
+      paddingTop: 58,
+      paddingBottom: 24,
     },
     header: {
-      gap: 10,
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: 16,
     },
     title: {
+      flex: 1,
       color: colors.primaryText,
       fontSize: 34,
       fontWeight: '900',
@@ -264,7 +276,8 @@ function createStyles(colors: ThemeColors) {
     link: {
       color: colors.accent,
       fontSize: 16,
-      fontWeight: '700',
+      fontWeight: '900',
+      paddingTop: 5,
     },
     muted: {
       color: colors.mutedText,

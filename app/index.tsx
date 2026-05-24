@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { Link } from 'expo-router';
+import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -59,13 +59,36 @@ const metricCategories: DashboardMetricCategory[] = [
   'Weather',
 ];
 
+const navigationItems = [
+  {
+    href: '/settings',
+    title: 'Settings',
+    eyebrow: 'Ride setup',
+    description: 'Units, recording behavior, profile, splits, and map display.',
+  },
+  {
+    href: '/permissions',
+    title: 'Permissions',
+    eyebrow: 'Access',
+    description: 'Location and Bluetooth permissions for reliable recording.',
+  },
+  {
+    href: '/history',
+    title: 'History',
+    eyebrow: 'Archive',
+    description: 'Saved rides, route previews, summaries, and splits.',
+  },
+] as const;
+
 export default function HomeScreen() {
+  const router = useRouter();
   const { settings, updateSetting } = useRideSettings();
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
   const styles = createStyles(colors);
   const recorder = useForegroundRideRecorder(settings);
   const [isRoutePlannerOpen, setIsRoutePlannerOpen] = useState(false);
+  const [isNavigationOpen, setIsNavigationOpen] = useState(false);
   const [destinationInput, setDestinationInput] = useState('');
   const [destinationOptions, setDestinationOptions] = useState<
     DestinationOption[]
@@ -77,6 +100,7 @@ export default function HomeScreen() {
     useState(false);
   const [isPlanningRoute, setIsPlanningRoute] = useState(false);
   const [routePlanError, setRoutePlanError] = useState<string | null>(null);
+  const [navigationPanelProgress] = useState(() => new Animated.Value(0));
   const [now, setNow] = useState<number | null>(null);
   const [stopFill] = useState(() => new Animated.Value(0));
   const [isEditingDashboard, setIsEditingDashboard] = useState(false);
@@ -264,6 +288,38 @@ export default function HomeScreen() {
     stopFill.setValue(0);
   }
 
+  function openNavigationPanel() {
+    navigationPanelProgress.stopAnimation();
+    navigationPanelProgress.setValue(1);
+    setIsNavigationOpen(true);
+  }
+
+  function closeNavigationPanel() {
+    navigationPanelProgress.stopAnimation();
+    Animated.timing(navigationPanelProgress, {
+      toValue: 0,
+      duration: 180,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        setIsNavigationOpen(false);
+      }
+    });
+  }
+
+  function navigateFromNavigationPanel(
+    href: (typeof navigationItems)[number]['href'],
+  ) {
+    router.push(href);
+
+    setTimeout(() => {
+      navigationPanelProgress.stopAnimation();
+      navigationPanelProgress.setValue(0);
+      setIsNavigationOpen(false);
+    }, 250);
+  }
+
   const routePlannerSheet = isRoutePlannerOpen ? (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -350,16 +406,90 @@ export default function HomeScreen() {
     </KeyboardAvoidingView>
   ) : null;
 
+  const navigationPanel = isNavigationOpen ? (
+    <View style={styles.navigationOverlay}>
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.navigationDim,
+          {
+            opacity: navigationPanelProgress.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 1],
+            }),
+          },
+        ]}
+      />
+      <Pressable
+        accessibilityLabel="Close menu"
+        style={styles.navigationDismissArea}
+        onPress={closeNavigationPanel}
+      />
+      <Animated.View
+        style={[
+          styles.navigationPanel,
+          {
+            paddingTop: Math.max(insets.top + 22, 46),
+            paddingBottom: Math.max(insets.bottom + 22, 34),
+            transform: [
+              {
+                translateX: navigationPanelProgress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [380, 0],
+                }),
+              },
+            ],
+          },
+        ]}
+      >
+        <View style={styles.navigationHeader}>
+          <View>
+            <Text style={styles.navigationEyebrow}>Pelot</Text>
+            <Text style={styles.navigationTitle}>Menu</Text>
+          </View>
+          <Pressable
+            accessibilityLabel="Close menu"
+            style={styles.navigationCloseButton}
+            onPress={closeNavigationPanel}
+          >
+            <Text style={styles.navigationCloseText}>Close</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.navigationList}>
+          {navigationItems.map((item) => (
+            <Pressable
+              key={item.href}
+              style={({ pressed }) => [
+                styles.navigationItem,
+                pressed ? styles.navigationItemPressed : null,
+              ]}
+              onPressIn={() => navigateFromNavigationPanel(item.href)}
+            >
+              <Text style={styles.navigationItemEyebrow}>{item.eyebrow}</Text>
+              <Text style={styles.navigationItemTitle}>{item.title}</Text>
+              <Text style={styles.navigationItemDescription}>
+                {item.description}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </Animated.View>
+    </View>
+  ) : null;
+
   return (
     <>
       <View style={styles.container}>
-        <Link href="/menu" asChild>
-          <Pressable accessibilityLabel="Open menu" style={styles.menuButton}>
-            <View style={styles.menuLine} />
-            <View style={styles.menuLine} />
-            <View style={styles.menuLine} />
-          </Pressable>
-        </Link>
+        <Pressable
+          accessibilityLabel="Open menu"
+          style={styles.menuButton}
+          onPress={openNavigationPanel}
+        >
+          <View style={styles.menuLine} />
+          <View style={styles.menuLine} />
+          <View style={styles.menuLine} />
+        </Pressable>
 
         <View
           style={[styles.dashboardArea, { paddingTop: insets.top }]}
@@ -514,6 +644,7 @@ export default function HomeScreen() {
         )}
 
         {routePlannerSheet}
+        {navigationPanel}
 
         <StatusBar style={settings.theme === 'light' ? 'dark' : 'light'} />
       </View>
@@ -742,6 +873,110 @@ function createStyles(colors: ThemeColors) {
       height: 2,
       borderRadius: 999,
       backgroundColor: colors.inverseBackground,
+    },
+    navigationOverlay: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      zIndex: 60,
+      alignItems: 'flex-end',
+    },
+    navigationDim: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0.52)',
+    },
+    navigationDismissArea: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+    },
+    navigationPanel: {
+      width: '84%',
+      maxWidth: 380,
+      height: '100%',
+      gap: 24,
+      borderLeftWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      paddingHorizontal: 18,
+      shadowColor: '#000',
+      shadowOffset: { width: -12, height: 0 },
+      shadowOpacity: 0.22,
+      shadowRadius: 24,
+      elevation: 12,
+    },
+    navigationHeader: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    navigationEyebrow: {
+      color: colors.success,
+      fontSize: 11,
+      fontWeight: '900',
+      letterSpacing: 1.2,
+      textTransform: 'uppercase',
+    },
+    navigationTitle: {
+      color: colors.primaryText,
+      fontSize: 30,
+      fontWeight: '900',
+      letterSpacing: -0.6,
+    },
+    navigationCloseButton: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    navigationCloseText: {
+      color: colors.accent,
+      fontSize: 13,
+      fontWeight: '900',
+    },
+    navigationList: {
+      gap: 12,
+    },
+    navigationItem: {
+      borderWidth: 2,
+      borderColor: colors.border,
+      borderRadius: 24,
+      backgroundColor: colors.elevatedCard,
+      padding: 16,
+    },
+    navigationItemPressed: {
+      opacity: 0.72,
+      transform: [{ scale: 0.99 }],
+    },
+    navigationItemEyebrow: {
+      color: colors.success,
+      fontSize: 11,
+      fontWeight: '900',
+      letterSpacing: 1.1,
+      textTransform: 'uppercase',
+    },
+    navigationItemTitle: {
+      color: colors.primaryText,
+      fontSize: 20,
+      fontWeight: '900',
+      letterSpacing: -0.2,
+      lineHeight: 24,
+    },
+    navigationItemDescription: {
+      marginTop: 5,
+      color: colors.mutedText,
+      fontSize: 14,
+      lineHeight: 19,
     },
     warning: {
       paddingHorizontal: 10,

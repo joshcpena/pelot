@@ -8,7 +8,14 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <RideSettingsProvider>
-        <Stack screenOptions={{ headerShown: false }} />
+        <Stack
+          screenOptions={{ animation: 'slide_from_right', headerShown: false }}
+        >
+          <Stack.Screen name="index" options={{ animation: 'none' }} />
+          <Stack.Screen name="settings" options={{ animation: 'none' }} />
+          <Stack.Screen name="permissions" options={{ animation: 'none' }} />
+          <Stack.Screen name="history" options={{ animation: 'none' }} />
+        </Stack>
       </RideSettingsProvider>
     </GestureHandlerRootView>
   );

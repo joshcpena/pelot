@@ -1,5 +1,6 @@
 import { Link } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   type ThemeColors,
@@ -10,32 +11,33 @@ const menuItems = [
   {
     href: '/settings',
     title: 'Settings',
-    description: 'Units, auto-pause, keep-awake, splits, and map display.',
+    eyebrow: 'Ride setup',
+    description: 'Units, recording behavior, profile, splits, and map display.',
   },
   {
     href: '/permissions',
     title: 'Permissions',
-    description: 'Location access for foreground and background recording.',
+    eyebrow: 'Access',
+    description: 'Location and Bluetooth permissions for reliable recording.',
   },
   {
     href: '/history',
     title: 'History',
-    description: 'Saved rides, summaries, and splits.',
+    eyebrow: 'Archive',
+    description: 'Saved rides, route previews, summaries, and splits.',
   },
 ] as const;
 
 export default function MenuScreen() {
   const colors = useThemeColors();
-  const styles = createStyles(colors);
+  const insets = useSafeAreaInsets();
+  const styles = createStyles(colors, insets.top);
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.header}>
-        <View>
-          <Text style={styles.kicker}>Pelot</Text>
-          <Text style={styles.title}>Menu</Text>
-        </View>
-        <Link href="/" style={styles.closeLink}>
+        <Text style={styles.menuLabel}>Menu</Text>
+        <Link dismissTo href="/" style={styles.closeLink}>
           Close
         </Link>
       </View>
@@ -43,84 +45,96 @@ export default function MenuScreen() {
       <View style={styles.menuList}>
         {menuItems.map((item) => (
           <Link key={item.href} href={item.href} asChild>
-            <Pressable style={styles.menuItem}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.menuItem,
+                pressed ? styles.menuItemPressed : null,
+              ]}
+            >
               <View style={styles.menuCopy}>
+                <Text style={styles.menuEyebrow}>{item.eyebrow}</Text>
                 <Text style={styles.menuTitle}>{item.title}</Text>
                 <Text style={styles.menuDescription}>{item.description}</Text>
               </View>
-              <Text style={styles.chevron}>›</Text>
             </Pressable>
           </Link>
         ))}
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
-function createStyles(colors: ThemeColors) {
+function createStyles(colors: ThemeColors, topInset: number) {
   return StyleSheet.create({
     container: {
       flex: 1,
-      gap: 24,
       backgroundColor: colors.background,
-      padding: 24,
-      paddingTop: 72,
+    },
+    content: {
+      gap: 20,
+      paddingHorizontal: 20,
+      paddingTop: Math.max(topInset + 28, 52),
+      paddingBottom: 32,
     },
     header: {
       flexDirection: 'row',
       alignItems: 'flex-start',
       justifyContent: 'space-between',
-      gap: 16,
+      gap: 12,
     },
-    kicker: {
-      color: colors.success,
-      fontSize: 14,
-      fontWeight: '800',
-      letterSpacing: 1.2,
-      textTransform: 'uppercase',
-    },
-    title: {
+    menuLabel: {
+      flex: 1,
       color: colors.primaryText,
-      fontSize: 34,
+      fontSize: 18,
       fontWeight: '900',
+      letterSpacing: -0.2,
     },
     closeLink: {
       color: colors.accent,
-      fontSize: 17,
+      fontSize: 16,
       fontWeight: '800',
+      paddingTop: 3,
     },
     menuList: {
       gap: 12,
     },
     menuItem: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 16,
-      borderWidth: 1,
+      borderWidth: 2,
       borderColor: colors.border,
-      borderRadius: 22,
+      borderRadius: 24,
       backgroundColor: colors.card,
       padding: 18,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.08,
+      shadowRadius: 18,
+    },
+    menuItemPressed: {
+      opacity: 0.72,
+      transform: [{ scale: 0.99 }],
     },
     menuCopy: {
-      flex: 1,
+      justifyContent: 'center',
+    },
+    menuEyebrow: {
+      color: colors.success,
+      fontSize: 11,
+      fontWeight: '900',
+      letterSpacing: 1.1,
+      textTransform: 'uppercase',
     },
     menuTitle: {
       color: colors.primaryText,
-      fontSize: 21,
+      fontSize: 20,
       fontWeight: '900',
+      letterSpacing: -0.2,
+      lineHeight: 24,
     },
     menuDescription: {
       marginTop: 5,
       color: colors.mutedText,
-      fontSize: 15,
-      lineHeight: 21,
-    },
-    chevron: {
-      color: colors.accent,
-      fontSize: 36,
-      fontWeight: '300',
+      fontSize: 14,
+      lineHeight: 19,
     },
   });
 }

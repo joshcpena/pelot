@@ -478,8 +478,17 @@ function MetricCardContent({
       </Text>
       <Text
         adjustsFontSizeToFit
-        numberOfLines={2}
-        style={[styles.metricValue, { fontSize: valueFontSize }]}
+        numberOfLines={isHeartRateMessage ? 3 : 2}
+        style={[
+          styles.metricValue,
+          isHeartRateMessage && styles.metricMessageValue,
+          {
+            fontSize: valueFontSize,
+            lineHeight: isHeartRateMessage
+              ? Math.round(valueFontSize * 0.96)
+              : undefined,
+          },
+        ]}
       >
         {value}
       </Text>
@@ -599,6 +608,10 @@ function createStyles(colors: ThemeColors) {
       color: colors.primaryText,
       fontWeight: '900',
       textAlign: 'center',
+    },
+    metricMessageValue: {
+      width: '100%',
+      flexShrink: 1,
     },
   });
 }

@@ -79,7 +79,12 @@ export default function PermissionsScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Permissions</Text>
+      <View style={styles.header}>
+        <Text style={styles.title}>Permissions</Text>
+        <Link dismissTo href="/" style={styles.link}>
+          Back to ride
+        </Link>
+      </View>
       <Text style={styles.copy}>
         Pelot needs location permission to record speed, distance, and route
         points. Background location will be used in the next recording
@@ -112,10 +117,6 @@ export default function PermissionsScreen() {
           <Text style={styles.buttonText}>Allow Bluetooth</Text>
         </Pressable>
       </View>
-
-      <Link href="/" style={styles.link}>
-        Back to ride
-      </Link>
     </View>
   );
 }
@@ -126,10 +127,17 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       gap: 16,
       backgroundColor: colors.background,
-      padding: 24,
-      paddingTop: 72,
+      paddingHorizontal: 20,
+      paddingTop: 58,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: 16,
     },
     title: {
+      flex: 1,
       color: colors.primaryText,
       fontSize: 34,
       fontWeight: '800',
@@ -174,7 +182,8 @@ function createStyles(colors: ThemeColors) {
     link: {
       color: colors.accent,
       fontSize: 16,
-      fontWeight: '700',
+      fontWeight: '900',
+      paddingTop: 5,
     },
   });
 }
