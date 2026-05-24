@@ -5,10 +5,17 @@
   },
   "build": {
     "preview": {
+      "env": {
+        "NODE_ENV": "production"
+      },
       "android": {
         "buildType": "apk"
       }
     },
-    "production": {}
+    "production": {
+      "env": {
+        "NODE_ENV": "production"
+      }
+    }
   }
 }

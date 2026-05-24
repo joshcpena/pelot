@@ -2,7 +2,7 @@ export type UnitSystem = 'imperial' | 'metric';
 
 export type AscentSource = 'barometer-preferred' | 'gps-only';
 
-export type GpsAccuracyPreference = 'balanced' | 'best';
+export type GpsAccuracyPreference = 'standard' | 'best';
 
 export type SplitType = 'distance' | 'time';
 

@@ -344,18 +344,19 @@ export function DashboardGrid({
           points={context.routePoints}
           mapType={settings.mapType}
           plannedRoute={context.plannedRoute}
+          unitSystem={settings.unitSystem}
         />
       </View>
     ) : (
-        <MetricCardContent
-          colors={colors}
-          metricId={card.metricId}
-          label={metric.label}
-          columns={columns}
-          rows={getSpanDimensions(card.span).rows}
-          value={metric.getValue(context)}
-        />
-      );
+      <MetricCardContent
+        colors={colors}
+        metricId={card.metricId}
+        label={metric.label}
+        columns={columns}
+        rows={getSpanDimensions(card.span).rows}
+        value={metric.getValue(context)}
+      />
+    );
   }
 }
 

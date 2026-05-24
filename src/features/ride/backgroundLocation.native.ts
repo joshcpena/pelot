@@ -2,7 +2,7 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 
 import { initializeDatabase } from '../../lib/database';
-import { getActiveRideId, insertRidePoint } from './rideStorage';
+import { getActiveRideId, insertRidePoints } from './rideStorage';
 import type { RideSettings } from './types';
 
 export const BACKGROUND_RIDE_LOCATION_TASK = 'pelot-background-ride-location';
@@ -34,9 +34,11 @@ TaskManager.defineTask<{
     return;
   }
 
-  for (const location of data.locations) {
-    await insertRidePoint(rideId, toRidePoint(location), 'background-gps');
-  }
+  await insertRidePoints(
+    rideId,
+    data.locations.map(toRidePoint),
+    'background-gps',
+  );
 });
 
 export async function isBackgroundRideRecordingAvailable() {
@@ -64,17 +66,17 @@ export async function startBackgroundRideRecording(settings: RideSettings) {
         ? Location.Accuracy.BestForNavigation
         : Location.Accuracy.Balanced,
     activityType: Location.ActivityType.Fitness,
-    deferredUpdatesDistance: 10,
-    deferredUpdatesInterval: settings.gpsAccuracy === 'best' ? 1000 : 5000,
-    distanceInterval: 5,
+    deferredUpdatesDistance: settings.gpsAccuracy === 'best' ? 10 : 50,
+    deferredUpdatesInterval: settings.gpsAccuracy === 'best' ? 1000 : 30000,
+    distanceInterval: settings.gpsAccuracy === 'best' ? 5 : 25,
     foregroundService: {
       notificationTitle: 'Pelot is recording your ride',
       notificationBody: 'Location is being used to keep tracking your route.',
       notificationColor: '#238636',
     },
-    pausesUpdatesAutomatically: false,
+    pausesUpdatesAutomatically: settings.gpsAccuracy !== 'best',
     showsBackgroundLocationIndicator: true,
-    timeInterval: settings.gpsAccuracy === 'best' ? 1000 : 3000,
+    timeInterval: settings.gpsAccuracy === 'best' ? 1000 : 10000,
   });
 
   return true;

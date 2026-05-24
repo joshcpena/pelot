@@ -7,7 +7,6 @@ import {
   Map,
   type ViewStateChangeEvent,
   Marker,
-  UserLocation,
   type LngLat,
   type LngLatBounds,
 } from '@maplibre/maplibre-react-native';
@@ -297,9 +296,8 @@ export function RideMap({
   const [loadedMapStyle, setLoadedMapStyle] = useState<string | null>(null);
   const [isCameraCentered, setIsCameraCentered] = useState(true);
   const [isTopDownView, setIsTopDownView] = useState(false);
-  const [currentCoordinate, setCurrentCoordinate] = useState<RouteCoordinate | null>(
-    null,
-  );
+  const [currentCoordinate, setCurrentCoordinate] =
+    useState<RouteCoordinate | null>(null);
   const coordinates = points.map(toCoordinate);
   const plannedCoordinates = plannedRoute?.coordinates;
   const plannedStepEndIndexes = plannedRoute?.steps.length
@@ -321,6 +319,7 @@ export function RideMap({
     lastLatitude !== undefined && lastLongitude !== undefined
       ? { latitude: lastLatitude, longitude: lastLongitude }
       : null;
+  const currentMarkerCoordinate = lastCoordinate ?? currentCoordinate;
   const mapCenter = lastCoordinate ?? currentCoordinate ?? DEFAULT_COORDINATE;
   const mapHeading = getHeading(points);
   const mapStyle = useMemo(
@@ -469,7 +468,9 @@ export function RideMap({
 
     fittedDestinationKeyRef.current = destinationFitKey;
 
-    const fitCoordinates = getSearchResultFitCoordinates(destinationCoordinates);
+    const fitCoordinates = getSearchResultFitCoordinates(
+      destinationCoordinates,
+    );
 
     if (fitCoordinates.length < 2) {
       cameraRef.current?.easeTo({
@@ -528,7 +529,10 @@ export function RideMap({
   function handleRegionWillChange(
     event: NativeSyntheticEvent<ViewStateChangeEvent>,
   ) {
-    if (event.nativeEvent.userInteraction && !isProgrammaticCameraMoveRef.current) {
+    if (
+      event.nativeEvent.userInteraction &&
+      !isProgrammaticCameraMoveRef.current
+    ) {
       setIsCameraCentered(false);
     }
   }
@@ -611,6 +615,7 @@ export function RideMap({
         attribution={false}
         compass
         logo={false}
+        preferredFramesPerSecond={30}
         onRegionWillChange={handleRegionWillChange}
         onDidFinishLoadingStyle={() => setLoadedMapStyle(mapStyleKey)}
       >
@@ -623,7 +628,17 @@ export function RideMap({
             zoom: lastCoordinate ? 17 : 15,
           }}
         />
-        <UserLocation accuracy animated heading />
+        {currentMarkerCoordinate ? (
+          <Marker
+            id="current-location"
+            anchor="center"
+            lngLat={toLngLat(currentMarkerCoordinate)}
+          >
+            <View style={styles.currentLocationMarker}>
+              <View style={styles.currentLocationDot} />
+            </View>
+          </Marker>
+        ) : null}
         {!plannedRoute
           ? destinationOptions.map((option, index) => (
               <Marker
@@ -682,7 +697,9 @@ export function RideMap({
       {activeNavigationStep ? (
         <View style={styles.mapHud} pointerEvents="box-none">
           <View style={styles.navigationBanner}>
-            <Text style={styles.navigationGlyph}>{activeNavigationStep.glyph}</Text>
+            <Text style={styles.navigationGlyph}>
+              {activeNavigationStep.glyph}
+            </Text>
             <View style={styles.navigationCopy}>
               {activeNavigationStep.distanceText ? (
                 <Text style={styles.navigationDistance}>
@@ -759,6 +776,22 @@ function createStyles(colors: ThemeColors) {
     },
     map: {
       flex: 1,
+    },
+    currentLocationMarker: {
+      width: 26,
+      height: 26,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 13,
+      backgroundColor: 'rgba(31, 111, 235, 0.18)',
+      borderWidth: 2,
+      borderColor: '#ffffff',
+    },
+    currentLocationDot: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      backgroundColor: '#1f6feb',
     },
     mapHud: {
       position: 'absolute',

@@ -5,10 +5,14 @@ function normalizeBatteryLevel(level: number) {
   return level >= 0 ? level : null;
 }
 
-export function useDeviceBatteryLevel() {
+export function useDeviceBatteryLevel(enabled = true) {
   const [batteryLevel, setBatteryLevel] = useState<number | null>(null);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     let isMounted = true;
 
     Battery.getBatteryLevelAsync()
@@ -31,7 +35,7 @@ export function useDeviceBatteryLevel() {
       isMounted = false;
       subscription.remove();
     };
-  }, []);
+  }, [enabled]);
 
-  return batteryLevel;
+  return enabled ? batteryLevel : null;
 }

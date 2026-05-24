@@ -544,22 +544,33 @@ export default function SettingsScreen() {
         <View style={styles.rowWrap}>
           <OptionButton
             styles={styles}
-            label="Prefer sensors"
-            value="barometer-preferred"
-            selectedValue={settings.ascentSource}
-            onSelect={(value) => update('ascentSource', value)}
-          />
-          <OptionButton
-            styles={styles}
             label="GPS only"
             value="gps-only"
             selectedValue={settings.ascentSource}
             onSelect={(value) => update('ascentSource', value)}
           />
+          <OptionButton
+            styles={styles}
+            label="Prefer sensors"
+            value="barometer-preferred"
+            selectedValue={settings.ascentSource}
+            onSelect={(value) => update('ascentSource', value)}
+          />
         </View>
+        <Text style={styles.muted}>
+          GPS only favors battery life. Prefer sensors uses the barometer when
+          available for better climbing precision.
+        </Text>
         <View style={styles.divider} />
-        <Text style={styles.label}>GPS accuracy</Text>
+        <Text style={styles.label}>GPS mode</Text>
         <View style={styles.rowWrap}>
+          <OptionButton
+            styles={styles}
+            label="Standard"
+            value="standard"
+            selectedValue={settings.gpsAccuracy}
+            onSelect={(value) => update('gpsAccuracy', value)}
+          />
           <OptionButton
             styles={styles}
             label="Best"
@@ -567,19 +578,16 @@ export default function SettingsScreen() {
             selectedValue={settings.gpsAccuracy}
             onSelect={(value) => update('gpsAccuracy', value)}
           />
-          <OptionButton
-            styles={styles}
-            label="Balanced"
-            value="balanced"
-            selectedValue={settings.gpsAccuracy}
-            onSelect={(value) => update('gpsAccuracy', value)}
-          />
         </View>
+        <Text style={styles.muted}>
+          Standard favors battery life. Best is intended for navigation or short
+          rides where maximum precision matters.
+        </Text>
       </Section>
 
       <Section
         title="Splits"
-        subtitle="Choose automatic lap markers."
+        subtitle="Choose automatic lap markers (1-100)."
         styles={styles}
       >
         <View style={styles.rowWrap}>
@@ -611,14 +619,11 @@ export default function SettingsScreen() {
             maxLength={3}
             placeholder="10"
             placeholderTextColor={colors.mutedText}
-            style={styles.input}
+            style={[styles.input, styles.splitValueInput]}
             onEndEditing={(event) => commitSplitValue(event.nativeEvent.text)}
             onChangeText={updateSplitValue}
           />
         </View>
-        <Text style={styles.muted}>
-          Enter any whole number from 1 to 100.
-        </Text>
       </Section>
 
       <Section
@@ -897,8 +902,15 @@ function createStyles(colors: ThemeColors) {
       gap: 6,
     },
     splitValueField: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
       gap: 6,
       marginTop: 12,
+    },
+    splitValueInput: {
+      width: 92,
+      textAlign: 'center',
     },
     input: {
       borderWidth: 1,

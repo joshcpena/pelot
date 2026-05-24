@@ -76,6 +76,7 @@ async function fetchCurrentWeather(point: RidePoint): Promise<WeatherSample> {
 export function useRideWeatherSamples(
   routePoints: RidePoint[],
   status: RideStatus,
+  enabled = true,
 ) {
   const [currentWeather, setCurrentWeather] = useState<WeatherSample | null>(
     null,
@@ -86,7 +87,7 @@ export function useRideWeatherSamples(
   const latestPoint = routePoints.at(-1) ?? null;
 
   useEffect(() => {
-    if (status === 'idle' || status === 'stopped') {
+    if (!enabled || status === 'idle' || status === 'stopped') {
       lastFetchAtRef.current = 0;
       lastFetchPointRef.current = null;
       const resetTimeout = setTimeout(() => {
@@ -96,10 +97,10 @@ export function useRideWeatherSamples(
 
       return () => clearTimeout(resetTimeout);
     }
-  }, [status]);
+  }, [enabled, status]);
 
   useEffect(() => {
-    if (status !== 'recording' || !latestPoint) {
+    if (!enabled || status !== 'recording' || !latestPoint) {
       return;
     }
 
@@ -133,7 +134,7 @@ export function useRideWeatherSamples(
     return () => {
       isCancelled = true;
     };
-  }, [latestPoint, status]);
+  }, [enabled, latestPoint, status]);
 
   return { currentWeather, weatherSamples };
 }

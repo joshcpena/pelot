@@ -87,6 +87,27 @@ const REROUTE_COOLDOWN_MS = 30_000;
 const AUTO_DIM_DELAY_MS = 30_000;
 const AUTO_DIM_BRIGHTNESS = 0.08;
 const STOP_HOLD_MS = 1000;
+const clockMetricIds = new Set<DashboardMetricId>([
+  'timeOfDay',
+  'sunrise',
+  'sunset',
+]);
+const weatherMetricIds = new Set<DashboardMetricId>([
+  'temperatureCurrent',
+  'temperatureAverage',
+  'temperatureLapAverage',
+  'temperatureMax',
+  'temperatureLapMax',
+  'temperatureMin',
+  'temperatureLapMin',
+  'windCurrent',
+  'windAverage',
+  'windLapAverage',
+  'windMax',
+  'windLapMax',
+  'windMin',
+  'windLapMin',
+]);
 
 function distanceBetweenCoordinates(a: RouteCoordinate, b: RouteCoordinate) {
   const earthRadiusMeters = 6_371_000;
@@ -204,18 +225,40 @@ export default function HomeScreen() {
   const shouldConnectHeartRate = displayedLayout.some(
     (card) => card.metricId === 'heartRateCurrent',
   );
+  const shouldReadDeviceBattery = displayedLayout.some(
+    (card) => card.metricId === 'deviceBatteryLevel',
+  );
+  const shouldCollectWeather = displayedLayout.some((card) =>
+    weatherMetricIds.has(card.metricId),
+  );
+  const shouldRunClock = displayedLayout.some((card) =>
+    clockMetricIds.has(card.metricId),
+  );
   const heartRate = useHeartRateMonitor(
     settings.connectedHeartRateDevice,
     shouldConnectHeartRate,
   );
-  const deviceBatteryLevel = useDeviceBatteryLevel();
-  const weather = useRideWeatherSamples(recorder.routePoints, recorder.status);
+  const deviceBatteryLevel = useDeviceBatteryLevel(shouldReadDeviceBattery);
+  const weather = useRideWeatherSamples(
+    recorder.routePoints,
+    recorder.status,
+    shouldCollectWeather,
+  );
 
   useEffect(() => {
+    if (!shouldRunClock) {
+      const resetTimeout = setTimeout(() => setNow(null), 0);
+      return () => clearTimeout(resetTimeout);
+    }
+
+    const initialTimeout = setTimeout(() => setNow(Date.now()), 0);
     const interval = setInterval(() => setNow(Date.now()), 1000);
 
-    return () => clearInterval(interval);
-  }, []);
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(interval);
+    };
+  }, [shouldRunClock]);
 
   useEffect(() => {
     if (!isPaused) {

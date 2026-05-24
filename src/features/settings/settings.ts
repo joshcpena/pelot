@@ -21,8 +21,8 @@ export const defaultRideSettings: RideSettings = {
   autoDimScreen: true,
   autoPause: false,
   autoLap: true,
-  ascentSource: 'barometer-preferred',
-  gpsAccuracy: 'best',
+  ascentSource: 'gps-only',
+  gpsAccuracy: 'standard',
   splitType: 'time',
   splitDistanceMeters: 1609.344,
   splitDurationSeconds: 600,
@@ -118,13 +118,17 @@ function decodeSetting<K extends SettingKey>(
   value: string,
 ): RideSettings[K] {
   try {
-    const decoded = JSON.parse(value) as RideSettings[K];
+    const decoded = JSON.parse(value) as unknown;
+
+    if (key === 'gpsAccuracy' && decoded === 'balanced') {
+      return 'standard' as RideSettings[K];
+    }
 
     if (key === 'dashboardLayout') {
       return validateDashboardLayout(decoded) as RideSettings[K];
     }
 
-    return decoded;
+    return decoded as RideSettings[K];
   } catch {
     return value as RideSettings[K];
   }

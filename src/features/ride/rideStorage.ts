@@ -23,6 +23,34 @@ type RidePointRow = {
   vertical_accuracy: number | null;
 };
 
+type RidePointSource = 'foreground-gps' | 'background-gps';
+
+const insertRidePointSql = `INSERT INTO ride_points (
+  ride_id,
+  recorded_at,
+  latitude,
+  longitude,
+  altitude,
+  speed_mps,
+  heading,
+  horizontal_accuracy,
+  vertical_accuracy,
+  source
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+function toRidePoint(row: RidePointRow): RidePoint {
+  return {
+    recordedAt: row.recorded_at,
+    latitude: row.latitude,
+    longitude: row.longitude,
+    altitude: row.altitude,
+    speedMps: row.speed_mps,
+    heading: row.heading,
+    horizontalAccuracy: row.horizontal_accuracy,
+    verticalAccuracy: row.vertical_accuracy,
+  };
+}
+
 export type RideSummary = {
   id: string;
   startedAt: number;
@@ -114,22 +142,11 @@ export async function getActiveRideId() {
 export async function insertRidePoint(
   rideId: string,
   point: RidePoint,
-  source: 'foreground-gps' | 'background-gps',
+  source: RidePointSource,
 ) {
   const db = await getDatabase();
   await db.runAsync(
-    `INSERT INTO ride_points (
-      ride_id,
-      recorded_at,
-      latitude,
-      longitude,
-      altitude,
-      speed_mps,
-      heading,
-      horizontal_accuracy,
-      vertical_accuracy,
-      source
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    insertRidePointSql,
     rideId,
     point.recordedAt,
     point.latitude,
@@ -141,6 +158,43 @@ export async function insertRidePoint(
     point.verticalAccuracy,
     source,
   );
+}
+
+export async function insertRidePoints(
+  rideId: string,
+  points: RidePoint[],
+  source: RidePointSource,
+) {
+  if (points.length === 0) {
+    return;
+  }
+
+  const db = await getDatabase();
+
+  await db.execAsync('BEGIN TRANSACTION');
+
+  try {
+    for (const point of points) {
+      await db.runAsync(
+        insertRidePointSql,
+        rideId,
+        point.recordedAt,
+        point.latitude,
+        point.longitude,
+        point.altitude,
+        point.speedMps,
+        point.heading,
+        point.horizontalAccuracy,
+        point.verticalAccuracy,
+        source,
+      );
+    }
+
+    await db.execAsync('COMMIT');
+  } catch (error) {
+    await db.execAsync('ROLLBACK');
+    throw error;
+  }
 }
 
 export async function loadRidePoints(rideId: string) {
@@ -160,16 +214,28 @@ export async function loadRidePoints(rideId: string) {
     rideId,
   );
 
-  return rows.map((row) => ({
-    recordedAt: row.recorded_at,
-    latitude: row.latitude,
-    longitude: row.longitude,
-    altitude: row.altitude,
-    speedMps: row.speed_mps,
-    heading: row.heading,
-    horizontalAccuracy: row.horizontal_accuracy,
-    verticalAccuracy: row.vertical_accuracy,
-  }));
+  return rows.map(toRidePoint);
+}
+
+export async function loadRidePointsAfter(rideId: string, recordedAt: number) {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<RidePointRow>(
+    `SELECT recorded_at,
+            latitude,
+            longitude,
+            altitude,
+            speed_mps,
+            heading,
+            horizontal_accuracy,
+            vertical_accuracy
+     FROM ride_points
+     WHERE ride_id = ? AND recorded_at > ?
+     ORDER BY recorded_at ASC`,
+    rideId,
+    recordedAt,
+  );
+
+  return rows.map(toRidePoint);
 }
 
 export async function deleteRide(rideId: string) {
