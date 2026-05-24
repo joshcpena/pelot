@@ -4,6 +4,7 @@
 /.expo
 /build
 /tmp
+*.apk
 
 # Logs
 logs
