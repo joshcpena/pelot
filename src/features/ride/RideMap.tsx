@@ -1,12 +1,21 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import { type ThemeColors, useThemeColors } from '../settings/settings';
-import type { PlannedRoute, RidePoint, RideSettings } from './types';
+import type {
+  DestinationOption,
+  PlannedRoute,
+  RidePoint,
+  RideSettings,
+} from './types';
 
 export function RideMap({
+  destinationOptions,
+  isNavigating,
   points,
   plannedRoute,
 }: {
+  destinationOptions?: DestinationOption[];
+  isNavigating?: boolean;
   points: RidePoint[];
   mapType?: RideSettings['mapType'];
   plannedRoute?: PlannedRoute | null;
@@ -23,8 +32,14 @@ export function RideMap({
       </Text>
       {plannedRoute ? (
         <Text style={styles.copy}>
-          Planned bike route to {plannedRoute.destination}:{' '}
+          {isNavigating ? 'Navigating' : 'Planned bike route'} to{' '}
+          {plannedRoute.destination}:{' '}
           {plannedRoute.distanceText}, {plannedRoute.durationText}.
+        </Text>
+      ) : null}
+      {destinationOptions && destinationOptions.length > 0 ? (
+        <Text style={styles.copy}>
+          {destinationOptions.length} destination options found.
         </Text>
       ) : null}
     </View>

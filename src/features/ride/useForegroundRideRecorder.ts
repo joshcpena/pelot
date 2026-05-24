@@ -39,6 +39,7 @@ const initialMetrics: RideMetrics = {
   lapNumber: 1,
   lapStartedAt: null,
   lapElapsedSeconds: 0,
+  lapPausedSeconds: 0,
   lapMovingSeconds: 0,
   lapDistanceMeters: 0,
   lapAscentMeters: 0,
@@ -85,6 +86,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
 
   const statusRef = useRef<RideStatus>('idle');
   const metricsRef = useRef<RideMetrics>(initialMetrics);
+  const isAutoPausedRef = useRef(false);
   const rideIdRef = useRef<string | null>(null);
   const watchRef = useRef<Location.LocationSubscription | null>(null);
   const barometerWatchRef = useRef<{ remove: () => void } | null>(null);
@@ -116,6 +118,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
           lapNumber: metricsRef.current.lapNumber + 1,
           lapStartedAt: now,
           lapElapsedSeconds: 0,
+          lapPausedSeconds: 0,
           lapMovingSeconds: 0,
           lapDistanceMeters: 0,
           lapAscentMeters: 0,
@@ -140,6 +143,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
     updateMetrics({
       ...metricsRef.current,
       pausedSeconds: metricsRef.current.pausedSeconds + pausedSeconds,
+      lapPausedSeconds: metricsRef.current.lapPausedSeconds + pausedSeconds,
     });
   }
 
@@ -204,18 +208,31 @@ export function useForegroundRideRecorder(settings: RideSettings) {
       );
       const elapsedSeconds =
         accumulatedElapsedSecondsRef.current + activeSeconds;
+      const movingSeconds = isAutoPausedRef.current
+        ? metricsRef.current.movingSeconds
+        : elapsedSeconds - metricsRef.current.pausedSeconds;
       const lapElapsedSeconds = Math.max(
         0,
         Math.floor(
           (Date.now() - (metricsRef.current.lapStartedAt ?? Date.now())) / 1000,
         ),
       );
+      const lapMovingSeconds = isAutoPausedRef.current
+        ? metricsRef.current.lapMovingSeconds
+        : Math.max(0, lapElapsedSeconds - metricsRef.current.lapPausedSeconds);
 
-      updateMetrics({
-        ...metricsRef.current,
-        elapsedSeconds,
-        lapElapsedSeconds,
-      });
+      updateMetrics(
+        withEstimatedCalories(
+          {
+            ...metricsRef.current,
+            elapsedSeconds,
+            movingSeconds,
+            lapElapsedSeconds,
+            lapMovingSeconds,
+          },
+          settings,
+        ),
+      );
 
       if (
         settings.autoLap &&
@@ -270,9 +287,8 @@ export function useForegroundRideRecorder(settings: RideSettings) {
         const autoPaused =
           settings.autoPause && currentSpeedMps < STOPPED_SPEED_MPS;
         const shouldCountMovement = !autoPaused && previousPoint != null;
-        const movingSeconds = shouldCountMovement
-          ? metricsRef.current.movingSeconds + secondsSincePrevious
-          : metricsRef.current.movingSeconds;
+        const movingSeconds = metricsRef.current.movingSeconds;
+        const lapMovingSeconds = metricsRef.current.lapMovingSeconds;
         const nextDistanceMeters = shouldCountMovement
           ? metricsRef.current.distanceMeters + distanceMeters
           : metricsRef.current.distanceMeters;
@@ -283,9 +299,6 @@ export function useForegroundRideRecorder(settings: RideSettings) {
         const lapAscentGain = previousPoint
           ? positiveElevationGainMeters(previousPoint, point)
           : 0;
-        const lapMovingSeconds = shouldCountMovement
-          ? metricsRef.current.lapMovingSeconds + secondsSincePrevious
-          : metricsRef.current.lapMovingSeconds;
         const lapDistanceMeters = shouldCountMovement
           ? metricsRef.current.lapDistanceMeters + distanceMeters
           : metricsRef.current.lapDistanceMeters;
@@ -305,6 +318,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
           currentSpeedMps,
         );
 
+        isAutoPausedRef.current = autoPaused;
         setIsAutoPaused(autoPaused);
         previousPointRef.current = point;
         setRoutePoints((current) => [...current, point]);
@@ -374,6 +388,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
       ),
     );
     setRoutePoints([]);
+    isAutoPausedRef.current = false;
     setIsAutoPaused(false);
     setRideStatus('recording');
     startTimer();
@@ -405,6 +420,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
     await stopBackgroundRideRecording();
     await deactivateKeepAwake(KEEP_AWAKE_TAG);
     pausedStartedAtRef.current = Date.now();
+    isAutoPausedRef.current = false;
     setIsAutoPaused(false);
     setRideStatus('paused');
   }
@@ -457,6 +473,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
       await setActiveRideId(null);
     }
 
+    isAutoPausedRef.current = false;
     setIsAutoPaused(false);
     setRideStatus('stopped');
     rideIdRef.current = null;

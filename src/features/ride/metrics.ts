@@ -140,6 +140,10 @@ function getMifflinStJeorRmrKcalPerDay(settings: RideSettings) {
   );
 }
 
+function getEstimatedWeightKg(settings: RideSettings) {
+  return settings.riderWeightKg ?? 75;
+}
+
 export function estimateActiveCyclingCaloriesKcal(
   movingSeconds: number,
   averageSpeedMps: number,
@@ -152,7 +156,10 @@ export function estimateActiveCyclingCaloriesKcal(
   const rmrKcalPerDay = getMifflinStJeorRmrKcalPerDay(settings);
 
   if (rmrKcalPerDay == null) {
-    return null;
+    const met = getCyclingMet(averageSpeedMps);
+    const movingMinutes = movingSeconds / 60;
+
+    return Math.max(0, met - 1) * 3.5 * getEstimatedWeightKg(settings) * movingMinutes / 200;
   }
 
   const met = getCyclingMet(averageSpeedMps);

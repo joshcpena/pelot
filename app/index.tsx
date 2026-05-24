@@ -6,7 +6,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Animated,
   Easing,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -28,12 +31,17 @@ import {
   type DashboardMetricCategory,
 } from '../src/features/ride/dashboard';
 import { DashboardGrid } from '../src/features/ride/DashboardGrid';
-import { planBikeRoute } from '../src/features/ride/routePlanning';
+import {
+  planBikeRoute,
+  searchBikeDestinations,
+} from '../src/features/ride/routePlanning';
 import type {
   DashboardCard,
   DashboardCardSpan,
   DashboardMetricId,
+  DestinationOption,
   PlannedRoute,
+  RouteCoordinate,
 } from '../src/features/ride/types';
 import { useForegroundRideRecorder } from '../src/features/ride/useForegroundRideRecorder';
 import { useHeartRateMonitor } from '../src/features/devices/heartRateMonitor';
@@ -59,7 +67,14 @@ export default function HomeScreen() {
   const recorder = useForegroundRideRecorder(settings);
   const [isRoutePlannerOpen, setIsRoutePlannerOpen] = useState(false);
   const [destinationInput, setDestinationInput] = useState('');
+  const [destinationOptions, setDestinationOptions] = useState<
+    DestinationOption[]
+  >([]);
+  const [routeSearchOrigin, setRouteSearchOrigin] =
+    useState<RouteCoordinate | null>(null);
   const [plannedRoute, setPlannedRoute] = useState<PlannedRoute | null>(null);
+  const [isSearchingDestinations, setIsSearchingDestinations] =
+    useState(false);
   const [isPlanningRoute, setIsPlanningRoute] = useState(false);
   const [routePlanError, setRoutePlanError] = useState<string | null>(null);
   const [now, setNow] = useState<number | null>(null);
@@ -156,37 +171,70 @@ export default function HomeScreen() {
     }
   }
 
-  async function handlePlanRoute() {
-    const destination = destinationInput.trim();
+  async function getRouteOrigin() {
+    const permission = await Location.requestForegroundPermissionsAsync();
 
-    if (!destination) {
+    if (permission.status !== Location.PermissionStatus.GRANTED) {
+      throw new Error('Location permission is required to plan a route.');
+    }
+
+    const position = await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.Balanced,
+    });
+
+    return {
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+    };
+  }
+
+  async function handleSearchDestinations() {
+    const query = destinationInput.trim();
+
+    if (!query) {
       setRoutePlanError('Enter a destination first.');
       return;
     }
 
+    Keyboard.dismiss();
+    setRoutePlanError(null);
+    setIsSearchingDestinations(true);
+    setPlannedRoute(null);
+
+    try {
+      const origin = await getRouteOrigin();
+      const options = await searchBikeDestinations({
+        query,
+        origin,
+      });
+
+      setRouteSearchOrigin(origin);
+      setDestinationOptions(options);
+    } catch (error) {
+      setRoutePlanError(
+        error instanceof Error
+          ? error.message
+          : 'Could not search destinations.',
+      );
+    } finally {
+      setIsSearchingDestinations(false);
+    }
+  }
+
+  async function handleSelectDestination(destination: DestinationOption) {
     setRoutePlanError(null);
     setIsPlanningRoute(true);
 
     try {
-      const permission = await Location.requestForegroundPermissionsAsync();
-
-      if (permission.status !== Location.PermissionStatus.GRANTED) {
-        setRoutePlanError('Location permission is required to plan a route.');
-        return;
-      }
-
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
+      const origin = routeSearchOrigin ?? (await getRouteOrigin());
       const route = await planBikeRoute({
         destination,
-        origin: {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        },
+        origin,
       });
 
       setPlannedRoute(route);
+      setDestinationOptions([]);
+      setRouteSearchOrigin(null);
       setIsRoutePlannerOpen(false);
     } catch (error) {
       setRoutePlanError(
@@ -201,7 +249,7 @@ export default function HomeScreen() {
     stopFill.setValue(0);
     Animated.timing(stopFill, {
       toValue: 1,
-      duration: 2500,
+      duration: 1000,
       easing: Easing.linear,
       useNativeDriver: false,
     }).start(({ finished }) => {
@@ -215,6 +263,92 @@ export default function HomeScreen() {
     stopFill.stopAnimation();
     stopFill.setValue(0);
   }
+
+  const routePlannerSheet = isRoutePlannerOpen ? (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      enabled={destinationOptions.length === 0}
+      pointerEvents={destinationOptions.length > 0 ? 'box-none' : 'auto'}
+      style={[
+        styles.routePlannerOverlay,
+        styles.modalBackdrop,
+        destinationOptions.length > 0 && styles.routeSelectionBackdrop,
+      ]}
+    >
+      <View style={styles.modalCard}>
+        <Text style={styles.modalTitle}>Plan bike route</Text>
+        <Text style={styles.modalCopy}>
+          Enter a destination, pick the correct result on the map or list, then
+          Pelot will draw the bike route here.
+        </Text>
+        {routePlanError ? <Text style={styles.error}>{routePlanError}</Text> : null}
+        <TextInput
+          autoCapitalize="words"
+          autoCorrect={false}
+          onChangeText={(value) => {
+            setDestinationInput(value);
+            setDestinationOptions([]);
+            setRoutePlanError(null);
+          }}
+          editable={!isSearchingDestinations && !isPlanningRoute}
+          onSubmitEditing={handleSearchDestinations}
+          placeholder="e.g. Gravelly Point"
+          placeholderTextColor="#6e7681"
+          returnKeyType="search"
+          style={styles.destinationInput}
+          value={destinationInput}
+        />
+        {destinationOptions.length > 0 ? (
+          <ScrollView style={styles.destinationResults}>
+            {destinationOptions.map((option, index) => (
+              <Pressable
+                key={option.id}
+                disabled={isPlanningRoute}
+                style={styles.destinationOption}
+                onPress={() => handleSelectDestination(option)}
+              >
+                <Text style={styles.destinationOptionIndex}>{index + 1}</Text>
+                <View style={styles.destinationOptionCopy}>
+                  <Text style={styles.destinationOptionName}>{option.name}</Text>
+                  {option.address ? (
+                    <Text style={styles.destinationOptionAddress}>
+                      {option.address}
+                    </Text>
+                  ) : null}
+                </View>
+              </Pressable>
+            ))}
+          </ScrollView>
+        ) : null}
+        <View style={styles.modalActions}>
+          <Pressable
+            style={styles.modalSecondaryButton}
+            onPress={() => setIsRoutePlannerOpen(false)}
+          >
+            <Text style={styles.secondaryButtonText}>Cancel</Text>
+          </Pressable>
+          <Pressable
+            disabled={isSearchingDestinations || isPlanningRoute}
+            style={[
+              styles.primaryButton,
+              isSearchingDestinations || isPlanningRoute
+                ? styles.disabledButton
+                : null,
+            ]}
+            onPress={handleSearchDestinations}
+          >
+            <Text style={styles.primaryButtonText}>
+              {isPlanningRoute
+                ? 'Planning...'
+                : isSearchingDestinations
+                  ? 'Searching...'
+                  : 'Search'}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    </KeyboardAvoidingView>
+  ) : null;
 
   return (
     <>
@@ -244,6 +378,8 @@ export default function HomeScreen() {
                 settings,
                 routePoints: recorder.routePoints,
                 plannedRoute,
+                destinationOptions,
+                isNavigating: recorder.status === 'recording' && plannedRoute != null,
                 now,
                 heartRateBpm: heartRate.heartRateBpm,
                 heartRateStatus: heartRate.status,
@@ -377,6 +513,8 @@ export default function HomeScreen() {
           </View>
         )}
 
+        {routePlannerSheet}
+
         <StatusBar style={settings.theme === 'light' ? 'dark' : 'light'} />
       </View>
 
@@ -398,57 +536,6 @@ export default function HomeScreen() {
         onSelect={chooseDashboardSpan}
       />
 
-      <Modal
-        animationType="slide"
-        transparent
-        visible={isRoutePlannerOpen}
-        onRequestClose={() => setIsRoutePlannerOpen(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Plan bike route</Text>
-            <Text style={styles.modalCopy}>
-              Enter a destination. Pelot will request Google bicycling
-              directions and draw the route here.
-            </Text>
-            {routePlanError ? (
-              <Text style={styles.error}>{routePlanError}</Text>
-            ) : null}
-            <TextInput
-              autoCapitalize="words"
-              autoCorrect={false}
-              onChangeText={setDestinationInput}
-              editable={!isPlanningRoute}
-              onSubmitEditing={handlePlanRoute}
-              placeholder="e.g. Gravelly Point"
-              placeholderTextColor="#6e7681"
-              returnKeyType="go"
-              style={styles.destinationInput}
-              value={destinationInput}
-            />
-            <View style={styles.modalActions}>
-              <Pressable
-                style={styles.modalSecondaryButton}
-                onPress={() => setIsRoutePlannerOpen(false)}
-              >
-                <Text style={styles.secondaryButtonText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                disabled={isPlanningRoute}
-                style={[
-                  styles.primaryButton,
-                  isPlanningRoute ? styles.disabledButton : null,
-                ]}
-                onPress={handlePlanRoute}
-              >
-                <Text style={styles.primaryButtonText}>
-                  {isPlanningRoute ? 'Planning...' : 'Plan route'}
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </>
   );
 }
@@ -702,6 +789,7 @@ function createStyles(colors: ThemeColors) {
     primaryButton: {
       flex: 1,
       alignItems: 'center',
+      justifyContent: 'center',
       borderRadius: 999,
       backgroundColor: colors.success,
       padding: 12,
@@ -727,6 +815,7 @@ function createStyles(colors: ThemeColors) {
       color: '#fff',
       fontSize: 15,
       fontWeight: '900',
+      textAlign: 'center',
     },
     secondaryButton: {
       flex: 1,
@@ -773,6 +862,17 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       justifyContent: 'flex-end',
       backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    },
+    routePlannerOverlay: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      zIndex: 50,
+    },
+    routeSelectionBackdrop: {
+      backgroundColor: 'transparent',
     },
     modal: {
       flex: 1,
@@ -907,6 +1007,46 @@ function createStyles(colors: ThemeColors) {
       paddingHorizontal: 16,
       paddingVertical: 14,
     },
+    destinationResults: {
+      maxHeight: 240,
+    },
+    destinationOption: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 16,
+      backgroundColor: colors.background,
+      marginBottom: 8,
+      padding: 12,
+    },
+    destinationOptionIndex: {
+      width: 26,
+      height: 26,
+      overflow: 'hidden',
+      borderRadius: 999,
+      backgroundColor: colors.accent,
+      color: '#fff',
+      fontSize: 13,
+      fontWeight: '900',
+      lineHeight: 26,
+      textAlign: 'center',
+    },
+    destinationOptionCopy: {
+      flex: 1,
+      gap: 3,
+    },
+    destinationOptionName: {
+      color: colors.primaryText,
+      fontSize: 15,
+      fontWeight: '900',
+    },
+    destinationOptionAddress: {
+      color: colors.mutedText,
+      fontSize: 12,
+      lineHeight: 17,
+    },
     modalActions: {
       flexDirection: 'row',
       gap: 12,
@@ -914,6 +1054,7 @@ function createStyles(colors: ThemeColors) {
     modalSecondaryButton: {
       flex: 1,
       alignItems: 'center',
+      justifyContent: 'center',
       borderWidth: 1,
       borderColor: colors.border,
       borderRadius: 999,

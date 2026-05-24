@@ -69,6 +69,8 @@ export type ThemeColors = {
   inverseText: string;
 };
 
+export type ResolvedTheme = 'light' | 'dark';
+
 const darkColors: ThemeColors = {
   background: '#0d1117',
   card: '#161b22',
@@ -211,10 +213,18 @@ export function useRideSettings() {
 }
 
 export function useThemeColors() {
-  const { settings } = useRideSettings();
-  const systemColorScheme = useColorScheme();
-  const resolvedTheme =
-    settings.theme === 'system' ? systemColorScheme : settings.theme;
+  const resolvedTheme = useResolvedTheme();
 
   return resolvedTheme === 'light' ? lightColors : darkColors;
+}
+
+export function useResolvedTheme(): ResolvedTheme {
+  const { settings } = useRideSettings();
+  const systemColorScheme = useColorScheme();
+
+  if (settings.theme !== 'system') {
+    return settings.theme;
+  }
+
+  return systemColorScheme === 'light' ? 'light' : 'dark';
 }

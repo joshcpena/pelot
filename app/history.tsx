@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'expo-router';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
   formatAscent,
@@ -15,6 +15,7 @@ import {
   useThemeColors,
 } from '../src/features/settings/settings';
 import {
+  deleteRide,
   loadRecentRides,
   loadRidePoints,
   loadRideSplits,
@@ -36,6 +37,7 @@ export default function HistoryScreen() {
     Record<string, RidePoint[]>
   >({});
   const [isLoading, setIsLoading] = useState(true);
+  const [deletingRideId, setDeletingRideId] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -79,6 +81,48 @@ export default function HistoryScreen() {
     };
   }, []);
 
+  async function removeRide(rideId: string) {
+    setDeletingRideId(rideId);
+
+    try {
+      await deleteRide(rideId);
+      setRides((currentRides) =>
+        currentRides.filter((ride) => ride.id !== rideId),
+      );
+      setSplitsByRideId((currentSplits) => {
+        const nextSplits = { ...currentSplits };
+        delete nextSplits[rideId];
+        return nextSplits;
+      });
+      setPointsByRideId((currentPoints) => {
+        const nextPoints = { ...currentPoints };
+        delete nextPoints[rideId];
+        return nextPoints;
+      });
+    } finally {
+      setDeletingRideId(null);
+    }
+  }
+
+  function confirmDeleteRide(ride: RideSummary) {
+    Alert.alert(
+      'Delete ride?',
+      `Delete the ride from ${new Date(ride.startedAt).toLocaleString()}? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            removeRide(ride.id).catch(() => {
+              Alert.alert('Could not delete ride', 'Please try again.');
+            });
+          },
+        },
+      ],
+    );
+  }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.header}>
@@ -99,9 +143,25 @@ export default function HistoryScreen() {
 
       {rides.map((ride) => (
         <View key={ride.id} style={styles.card}>
-          <Text style={styles.date}>
-            {new Date(ride.startedAt).toLocaleString()}
-          </Text>
+          <View style={styles.cardHeader}>
+            <Text style={styles.date}>
+              {new Date(ride.startedAt).toLocaleString()}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Delete ride"
+              disabled={deletingRideId === ride.id}
+              onPress={() => confirmDeleteRide(ride)}
+              style={({ pressed }) => [
+                styles.deleteButton,
+                pressed ? styles.deleteButtonPressed : null,
+              ]}
+            >
+              <Text style={styles.deleteButtonText}>
+                {deletingRideId === ride.id ? 'Deleting...' : 'Delete'}
+              </Text>
+            </Pressable>
+          </View>
           <HistoryRouteMap points={pointsByRideId[ride.id] ?? []} />
           <View style={styles.grid}>
             <SummaryMetric
@@ -217,10 +277,31 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.card,
       padding: 18,
     },
+    cardHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
     date: {
+      flex: 1,
       color: colors.primaryText,
       fontSize: 18,
       fontWeight: '800',
+    },
+    deleteButton: {
+      borderRadius: 999,
+      backgroundColor: colors.dangerSoft,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+    },
+    deleteButtonPressed: {
+      opacity: 0.72,
+    },
+    deleteButtonText: {
+      color: colors.danger,
+      fontSize: 13,
+      fontWeight: '900',
     },
     grid: {
       flexDirection: 'row',

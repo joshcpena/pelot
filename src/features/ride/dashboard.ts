@@ -11,6 +11,7 @@ import type {
   DashboardCard,
   DashboardCardSpan,
   DashboardMetricId,
+  DestinationOption,
   PlannedRoute,
   RideMetrics,
   RidePoint,
@@ -34,6 +35,8 @@ export type DashboardValueContext = {
   settings: RideSettings;
   routePoints: RidePoint[];
   plannedRoute: PlannedRoute | null;
+  destinationOptions: DestinationOption[];
+  isNavigating: boolean;
   now: number | null;
   heartRateBpm: number | null;
   heartRateStatus:
@@ -88,6 +91,7 @@ export const defaultDashboardLayout: DashboardCard[] = [
 
 const allSpans = dashboardSpans;
 const metricSpans = dashboardSpans;
+const ELEVATION_CHANGE_THRESHOLD_METERS = 3;
 
 function unavailable() {
   return '-!-';
@@ -111,10 +115,261 @@ function createUnavailableMetric(
   };
 }
 
+function getLapPoints({ metrics, routePoints }: DashboardValueContext) {
+  if (metrics.lapStartedAt == null) {
+    return routePoints;
+  }
+
+  return routePoints.filter((point) => point.recordedAt >= metrics.lapStartedAt!);
+}
+
+function getAltitudePoints(points: RidePoint[]) {
+  return points.filter(
+    (point): point is RidePoint & { altitude: number } =>
+      point.altitude != null,
+  );
+}
+
+function sumElevationChangeMeters(points: RidePoint[], direction: 'up' | 'down') {
+  const altitudePoints = getAltitudePoints(points);
+  let total = 0;
+
+  for (let index = 1; index < altitudePoints.length; index += 1) {
+    const change = altitudePoints[index].altitude - altitudePoints[index - 1].altitude;
+
+    if (direction === 'up' && change >= ELEVATION_CHANGE_THRESHOLD_METERS) {
+      total += change;
+    }
+
+    if (direction === 'down' && change <= -ELEVATION_CHANGE_THRESHOLD_METERS) {
+      total += Math.abs(change);
+    }
+  }
+
+  return total;
+}
+
+function getCurrentElevationMeters(points: RidePoint[]) {
+  return getAltitudePoints(points).at(-1)?.altitude ?? null;
+}
+
+function getAverageElevationMeters(points: RidePoint[]) {
+  const altitudePoints = getAltitudePoints(points);
+
+  if (altitudePoints.length === 0) {
+    return null;
+  }
+
+  return (
+    altitudePoints.reduce((total, point) => total + point.altitude, 0) /
+    altitudePoints.length
+  );
+}
+
+function getElevationExtremeMeters(points: RidePoint[], type: 'max' | 'min') {
+  const altitudes = getAltitudePoints(points).map((point) => point.altitude);
+
+  if (altitudes.length === 0) {
+    return null;
+  }
+
+  return type === 'max' ? Math.max(...altitudes) : Math.min(...altitudes);
+}
+
+function getElevationTotalChangeMeters(points: RidePoint[]) {
+  const altitudePoints = getAltitudePoints(points);
+  const first = altitudePoints[0];
+  const last = altitudePoints.at(-1);
+
+  if (!first || !last) {
+    return null;
+  }
+
+  return last.altitude - first.altitude;
+}
+
+function formatOptionalAscent(
+  meters: number | null,
+  unitSystem: RideSettings['unitSystem'],
+) {
+  return meters == null ? '--' : formatAscent(meters, unitSystem);
+}
+
+function formatGrade(value: number | null) {
+  return value == null ? '--' : `${value.toFixed(1)}%`;
+}
+
+function getSegmentGrades(points: RidePoint[]) {
+  const grades: number[] = [];
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const next = points[index];
+
+    if (previous.altitude == null || next.altitude == null) {
+      continue;
+    }
+
+    const distanceMeters = distanceBetweenCoordinates(previous, next);
+
+    if (distanceMeters < 5) {
+      continue;
+    }
+
+    grades.push(((next.altitude - previous.altitude) / distanceMeters) * 100);
+  }
+
+  return grades;
+}
+
+function getCurrentGrade(points: RidePoint[]) {
+  const altitudePoints = getAltitudePoints(points);
+
+  for (let index = altitudePoints.length - 1; index > 0; index -= 1) {
+    const previous = altitudePoints[index - 1];
+    const next = altitudePoints[index];
+    const distanceMeters = distanceBetweenCoordinates(previous, next);
+
+    if (distanceMeters >= 5) {
+      return ((next.altitude - previous.altitude) / distanceMeters) * 100;
+    }
+  }
+
+  return null;
+}
+
+function getAverageGrade(points: RidePoint[]) {
+  const altitudePoints = getAltitudePoints(points);
+  const first = altitudePoints[0];
+  const last = altitudePoints.at(-1);
+
+  if (!first || !last) {
+    return null;
+  }
+
+  const distanceMeters = distanceBetweenCoordinates(first, last);
+
+  return distanceMeters > 0
+    ? ((last.altitude - first.altitude) / distanceMeters) * 100
+    : null;
+}
+
+function getGradeExtreme(points: RidePoint[], type: 'max' | 'min') {
+  const grades = getSegmentGrades(points);
+
+  if (grades.length === 0) {
+    return null;
+  }
+
+  return type === 'max' ? Math.max(...grades) : Math.min(...grades);
+}
+
+function distanceBetweenCoordinates(a: RidePoint, b: RidePoint) {
+  const earthRadiusMeters = 6_371_000;
+  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+  const deltaLatitude = toRadians(b.latitude - a.latitude);
+  const deltaLongitude = toRadians(b.longitude - a.longitude);
+  const latitudeA = toRadians(a.latitude);
+  const latitudeB = toRadians(b.latitude);
+  const haversine =
+    Math.sin(deltaLatitude / 2) ** 2 +
+    Math.cos(latitudeA) *
+      Math.cos(latitudeB) *
+      Math.sin(deltaLongitude / 2) ** 2;
+
+  return (
+    earthRadiusMeters *
+    2 *
+    Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine))
+  );
+}
+
+function getCurrentCoordinate(routePoints: RidePoint[]) {
+  return routePoints.at(-1) ?? null;
+}
+
+function getSunTime(
+  routePoints: RidePoint[],
+  timestamp: number | null,
+  type: 'sunrise' | 'sunset',
+) {
+  const coordinate = getCurrentCoordinate(routePoints);
+
+  if (!coordinate || timestamp == null) {
+    return null;
+  }
+
+  const date = new Date(timestamp);
+  const startOfYear = new Date(date.getFullYear(), 0, 0);
+  const dayOfYear = Math.floor(
+    (date.getTime() - startOfYear.getTime()) / 86_400_000,
+  );
+  const longitudeHour = coordinate.longitude / 15;
+  const approximateTime =
+    dayOfYear + ((type === 'sunrise' ? 6 : 18) - longitudeHour) / 24;
+  const meanAnomaly = 0.9856 * approximateTime - 3.289;
+  const trueLongitude = normalizeDegrees(
+    meanAnomaly +
+      1.916 * Math.sin(toRadians(meanAnomaly)) +
+      0.02 * Math.sin(2 * toRadians(meanAnomaly)) +
+      282.634,
+  );
+  const rightAscension = normalizeDegrees(
+    toDegrees(Math.atan(0.91764 * Math.tan(toRadians(trueLongitude)))),
+  );
+  const adjustedRightAscension =
+    rightAscension +
+    Math.floor(trueLongitude / 90) * 90 -
+    Math.floor(rightAscension / 90) * 90;
+  const sinDeclination = 0.39782 * Math.sin(toRadians(trueLongitude));
+  const cosDeclination = Math.cos(Math.asin(sinDeclination));
+  const cosHourAngle =
+    (Math.cos(toRadians(90.833)) -
+      sinDeclination * Math.sin(toRadians(coordinate.latitude))) /
+    (cosDeclination * Math.cos(toRadians(coordinate.latitude)));
+
+  if (cosHourAngle < -1 || cosHourAngle > 1) {
+    return null;
+  }
+
+  const hourAngle =
+    type === 'sunrise'
+      ? 360 - toDegrees(Math.acos(cosHourAngle))
+      : toDegrees(Math.acos(cosHourAngle));
+  const localMeanTime =
+    hourAngle / 15 +
+    adjustedRightAscension / 15 -
+    0.06571 * approximateTime -
+    6.622;
+  const utcHour = normalizeHours(localMeanTime - longitudeHour);
+  const result = new Date(date);
+
+  result.setUTCHours(0, 0, 0, 0);
+  result.setTime(result.getTime() + utcHour * 3_600_000);
+
+  return result.getTime();
+}
+
+function toRadians(degrees: number) {
+  return (degrees * Math.PI) / 180;
+}
+
+function toDegrees(radians: number) {
+  return (radians * 180) / Math.PI;
+}
+
+function normalizeDegrees(degrees: number) {
+  return ((degrees % 360) + 360) % 360;
+}
+
+function normalizeHours(hours: number) {
+  return ((hours % 24) + 24) % 24;
+}
+
 export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   {
     id: 'caloriesTotal',
-    label: 'Calories Total',
+    label: 'Total Calories',
     category: 'Calories',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
@@ -122,7 +377,7 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'caloriesLap',
-    label: 'Calories Lap',
+    label: 'Lap Calories',
     category: 'Calories',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
@@ -145,7 +400,7 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'lapTotalDistance',
-    label: 'Lap Total Distance',
+    label: 'Lap Distance',
     category: 'Distance',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
@@ -163,109 +418,182 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'lapTotalAscent',
-    label: 'Lap Total Ascent',
+    label: 'Lap Ascent',
     category: 'Elevation',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
     getValue: ({ metrics, settings }) =>
       formatAscent(metrics.lapAscentMeters, settings.unitSystem),
   },
-  createUnavailableMetric(
-    'totalDescent',
-    'Total Descent',
-    'Elevation',
-    'Track negative elevation changes with smoothing.',
-  ),
-  createUnavailableMetric(
-    'lapTotalDescent',
-    'Lap Total Descent',
-    'Elevation',
-    'Track lap negative elevation changes with smoothing.',
-  ),
-  createUnavailableMetric(
-    'elevationCurrent',
-    'Elevation Current',
-    'Elevation',
-    'Expose the latest smoothed barometer/GPS elevation.',
-  ),
-  createUnavailableMetric(
-    'elevationAverage',
-    'Elevation Average',
-    'Elevation',
-    'Aggregate average elevation across recorded points.',
-  ),
-  createUnavailableMetric(
-    'elevationLapAverage',
-    'Elevation Lap Average',
-    'Elevation',
-    'Aggregate average elevation across current lap points.',
-  ),
-  createUnavailableMetric(
-    'elevationMax',
-    'Elevation Max',
-    'Elevation',
-    'Track maximum smoothed elevation.',
-  ),
-  createUnavailableMetric(
-    'elevationLapMax',
-    'Elevation Lap Max',
-    'Elevation',
-    'Track maximum smoothed elevation for the current lap.',
-  ),
-  createUnavailableMetric(
-    'elevationMin',
-    'Elevation Min',
-    'Elevation',
-    'Track minimum smoothed elevation.',
-  ),
-  createUnavailableMetric(
-    'elevationLapMin',
-    'Elevation Lap Min',
-    'Elevation',
-    'Track minimum smoothed elevation for the current lap.',
-  ),
-  createUnavailableMetric(
-    'elevationTotalChange',
-    'Elevation Total Change',
-    'Elevation',
-    'Compare current elevation against ride start elevation.',
-  ),
-  createUnavailableMetric(
-    'gradeCurrent',
-    'Grade Current',
-    'Elevation',
-    'Calculate smoothed grade over a rolling distance window.',
-  ),
-  createUnavailableMetric(
-    'gradeAverage',
-    'Grade Average',
-    'Elevation',
-    'Calculate ride average grade from elevation and distance.',
-  ),
-  createUnavailableMetric(
-    'gradeLapAverage',
-    'Grade Lap Average',
-    'Elevation',
-    'Calculate current lap average grade.',
-  ),
-  createUnavailableMetric(
-    'gradeMax',
-    'Grade Max',
-    'Elevation',
-    'Track maximum smoothed grade.',
-  ),
-  createUnavailableMetric(
-    'gradeMin',
-    'Grade Min',
-    'Elevation',
-    'Track minimum smoothed grade.',
-  ),
-  createUnavailableMetric(
-    'gradeLapMin',
-    'Grade Lap Min',
-    'Elevation',
-    'Track current lap minimum smoothed grade.',
-  ),
+  {
+    id: 'totalDescent',
+    label: 'Total Descent',
+    category: 'Elevation',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: ({ routePoints, settings }) =>
+      formatAscent(
+        sumElevationChangeMeters(routePoints, 'down'),
+        settings.unitSystem,
+      ),
+  },
+  {
+    id: 'lapTotalDescent',
+    label: 'Lap Descent',
+    category: 'Elevation',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: (context) =>
+      formatAscent(
+        sumElevationChangeMeters(getLapPoints(context), 'down'),
+        context.settings.unitSystem,
+      ),
+  },
+  {
+    id: 'elevationCurrent',
+    label: 'Current Elevation',
+    category: 'Elevation',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: ({ routePoints, settings }) =>
+      formatOptionalAscent(
+        getCurrentElevationMeters(routePoints),
+        settings.unitSystem,
+      ),
+  },
+  {
+    id: 'elevationAverage',
+    label: 'Average Elevation',
+    category: 'Elevation',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: ({ routePoints, settings }) =>
+      formatOptionalAscent(
+        getAverageElevationMeters(routePoints),
+        settings.unitSystem,
+      ),
+  },
+  {
+    id: 'elevationLapAverage',
+    label: 'Lap Average Elevation',
+    category: 'Elevation',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: (context) =>
+      formatOptionalAscent(
+        getAverageElevationMeters(getLapPoints(context)),
+        context.settings.unitSystem,
+      ),
+  },
+  {
+    id: 'elevationMax',
+    label: 'Max Elevation',
+    category: 'Elevation',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: ({ routePoints, settings }) =>
+      formatOptionalAscent(
+        getElevationExtremeMeters(routePoints, 'max'),
+        settings.unitSystem,
+      ),
+  },
+  {
+    id: 'elevationLapMax',
+    label: 'Lap Max Elevation',
+    category: 'Elevation',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: (context) =>
+      formatOptionalAscent(
+        getElevationExtremeMeters(getLapPoints(context), 'max'),
+        context.settings.unitSystem,
+      ),
+  },
+  {
+    id: 'elevationMin',
+    label: 'Min Elevation',
+    category: 'Elevation',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: ({ routePoints, settings }) =>
+      formatOptionalAscent(
+        getElevationExtremeMeters(routePoints, 'min'),
+        settings.unitSystem,
+      ),
+  },
+  {
+    id: 'elevationLapMin',
+    label: 'Lap Min Elevation',
+    category: 'Elevation',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: (context) =>
+      formatOptionalAscent(
+        getElevationExtremeMeters(getLapPoints(context), 'min'),
+        context.settings.unitSystem,
+      ),
+  },
+  {
+    id: 'elevationTotalChange',
+    label: 'Total Elevation Change',
+    category: 'Elevation',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: ({ routePoints, settings }) =>
+      formatOptionalAscent(
+        getElevationTotalChangeMeters(routePoints),
+        settings.unitSystem,
+      ),
+  },
+  {
+    id: 'gradeCurrent',
+    label: 'Current Grade',
+    category: 'Elevation',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: ({ routePoints }) => formatGrade(getCurrentGrade(routePoints)),
+  },
+  {
+    id: 'gradeAverage',
+    label: 'Average Grade',
+    category: 'Elevation',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: ({ routePoints }) => formatGrade(getAverageGrade(routePoints)),
+  },
+  {
+    id: 'gradeLapAverage',
+    label: 'Lap Average Grade',
+    category: 'Elevation',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: (context) => formatGrade(getAverageGrade(getLapPoints(context))),
+  },
+  {
+    id: 'gradeMax',
+    label: 'Max Grade',
+    category: 'Elevation',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: ({ routePoints }) => formatGrade(getGradeExtreme(routePoints, 'max')),
+  },
+  {
+    id: 'gradeMin',
+    label: 'Min Grade',
+    category: 'Elevation',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: ({ routePoints }) => formatGrade(getGradeExtreme(routePoints, 'min')),
+  },
+  {
+    id: 'gradeLapMin',
+    label: 'Lap Min Grade',
+    category: 'Elevation',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: (context) =>
+      formatGrade(getGradeExtreme(getLapPoints(context), 'min')),
+  },
   {
     id: 'lapNumber',
     label: 'Lap Number',
@@ -284,7 +612,7 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'paceCurrent',
-    label: 'Pace Current',
+    label: 'Current Pace',
     category: 'Speed & Pace',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
@@ -293,7 +621,7 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'paceAverage',
-    label: 'Pace Average',
+    label: 'Average Pace',
     category: 'Speed & Pace',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
@@ -302,7 +630,7 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'paceLapAverage',
-    label: 'Pace Lap Average',
+    label: 'Lap Average Pace',
     category: 'Speed & Pace',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
@@ -311,7 +639,7 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'paceMax',
-    label: 'Pace Max',
+    label: 'Max Pace',
     category: 'Speed & Pace',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
@@ -320,7 +648,7 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'paceLapMax',
-    label: 'Pace Lap Max',
+    label: 'Lap Max Pace',
     category: 'Speed & Pace',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
@@ -329,7 +657,7 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'speedCurrent',
-    label: 'Speed Current',
+    label: 'Current Speed',
     category: 'Speed & Pace',
     supportedSpans: metricSpans,
     defaultSpan: '3x1',
@@ -338,7 +666,7 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'speedMax',
-    label: 'Speed Max',
+    label: 'Max Speed',
     category: 'Speed & Pace',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
@@ -347,7 +675,7 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'speedAverage',
-    label: 'Speed Average',
+    label: 'Average Speed',
     category: 'Speed & Pace',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
@@ -356,7 +684,7 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'speedLapAverage',
-    label: 'Speed Lap Average',
+    label: 'Lap Average Speed',
     category: 'Speed & Pace',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
@@ -365,7 +693,7 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'speedLapMax',
-    label: 'Speed Lap Max',
+    label: 'Lap Max Speed',
     category: 'Speed & Pace',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
@@ -374,7 +702,7 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'totalTimeRecorded',
-    label: 'Total Time Recorded',
+    label: 'Moving Time',
     category: 'Time',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
@@ -382,7 +710,7 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'totalLapTimeRecorded',
-    label: 'Total Lap Time Recorded',
+    label: 'Lap Moving Time',
     category: 'Time',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
@@ -390,7 +718,7 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'totalElapsed',
-    label: 'Total Elapsed',
+    label: 'Elapsed Time',
     category: 'Time',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
@@ -398,7 +726,7 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'totalLapTimeElapsed',
-    label: 'Total Lap Time Elapsed',
+    label: 'Lap Elapsed Time',
     category: 'Time',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
@@ -406,21 +734,23 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'timeTotalPaused',
-    label: 'Time Total Paused',
+    label: 'Total Paused Time',
     category: 'Time',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
     getValue: ({ metrics }) => formatDuration(metrics.pausedSeconds),
   },
-  createUnavailableMetric(
-    'timeLapTotalPaused',
-    'Time Lap Total Paused',
-    'Time',
-    'Track pause duration scoped to the current lap.',
-  ),
+  {
+    id: 'timeLapTotalPaused',
+    label: 'Lap Paused Time',
+    category: 'Time',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: ({ metrics }) => formatDuration(metrics.lapPausedSeconds),
+  },
   {
     id: 'timeStart',
-    label: 'Time Start',
+    label: 'Start Time',
     category: 'Time',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
@@ -428,7 +758,7 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'timeLapStart',
-    label: 'Time Lap Start',
+    label: 'Lap Start Time',
     category: 'Time',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
@@ -436,105 +766,111 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
   },
   {
     id: 'timeOfDay',
-    label: 'Time Of Day',
+    label: 'Time of Day',
     category: 'Time',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
     getValue: ({ now }) => formatTimeOfDay(now),
   },
-  createUnavailableMetric(
-    'sunrise',
-    'Sunrise',
-    'Time',
-    'Calculate sunrise from date and current coordinates.',
-  ),
-  createUnavailableMetric(
-    'sunset',
-    'Sunset',
-    'Time',
-    'Calculate sunset from date and current coordinates.',
-  ),
+  {
+    id: 'sunrise',
+    label: 'Sunrise',
+    category: 'Time',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: ({ routePoints, metrics, now }) =>
+      formatTimeOfDay(getSunTime(routePoints, now ?? metrics.startedAt, 'sunrise')),
+  },
+  {
+    id: 'sunset',
+    label: 'Sunset',
+    category: 'Time',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: ({ routePoints, metrics, now }) =>
+      formatTimeOfDay(getSunTime(routePoints, now ?? metrics.startedAt, 'sunset')),
+  },
   createUnavailableMetric(
     'temperatureCurrent',
-    'Temperature Current',
+    'Current Temperature',
     'Weather',
     'Fetch current temperature from a weather provider.',
   ),
   createUnavailableMetric(
     'temperatureAverage',
-    'Temp Average',
+    'Average Temp',
     'Weather',
     'Aggregate average temperature samples during a ride.',
   ),
   createUnavailableMetric(
     'temperatureLapAverage',
-    'Temp Lap Average',
+    'Lap Average Temp',
     'Weather',
     'Aggregate average temperature samples during a lap.',
   ),
   createUnavailableMetric(
     'temperatureMax',
-    'Temp Max',
+    'Max Temp',
     'Weather',
     'Track maximum temperature sample during a ride.',
   ),
   createUnavailableMetric(
     'temperatureLapMax',
-    'Temp Lap Max',
+    'Lap Max Temp',
     'Weather',
     'Track maximum temperature sample during a lap.',
   ),
   createUnavailableMetric(
     'temperatureMin',
-    'Temp Min',
+    'Min Temp',
     'Weather',
     'Track minimum temperature sample during a ride.',
   ),
   createUnavailableMetric(
     'temperatureLapMin',
-    'Temp Lap Min',
+    'Lap Min Temp',
     'Weather',
     'Track minimum temperature sample during a lap.',
   ),
   createUnavailableMetric(
     'windCurrent',
-    'Wind Current',
+    'Current Wind',
     'Weather',
     'Fetch current wind from a weather provider.',
   ),
   createUnavailableMetric(
     'windAverage',
-    'Wind Average',
+    'Average Wind',
     'Weather',
     'Aggregate average wind samples during a ride.',
   ),
   createUnavailableMetric(
     'windLapAverage',
-    'Wind Lap Average',
+    'Lap Average Wind',
     'Weather',
     'Aggregate average wind samples during a lap.',
   ),
   createUnavailableMetric(
     'windMax',
-    'Wind Max',
+    'Max Wind',
     'Weather',
     'Track maximum wind sample during a ride.',
   ),
   createUnavailableMetric(
     'windMin',
-    'Wind Min',
+    'Min Wind',
     'Weather',
     'Track minimum wind sample during a ride.',
   ),
   createUnavailableMetric(
     'windLapMin',
-    'Wind Lap Min',
+    'Lap Min Wind',
     'Weather',
     'Track minimum wind sample during a lap.',
   ),
   {
     id: 'heartRateCurrent',
-    label: 'Heart Rate Current',
+    label: 'Current Heart Rate',
     category: 'Health',
     supportedSpans: metricSpans,
     defaultSpan: '1.5x2',

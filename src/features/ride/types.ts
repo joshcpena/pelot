@@ -35,6 +35,7 @@ export type RideMetrics = {
   lapNumber: number;
   lapStartedAt: number | null;
   lapElapsedSeconds: number;
+  lapPausedSeconds: number;
   lapMovingSeconds: number;
   lapDistanceMeters: number;
   lapAscentMeters: number;
@@ -143,10 +144,24 @@ export type RouteCoordinate = {
   longitude: number;
 };
 
+export type DestinationOption = {
+  id: string;
+  name: string;
+  address: string | null;
+  coordinate: RouteCoordinate;
+};
+
 export type PlannedRoute = {
   destination: string;
   distanceText: string;
   durationText: string;
+  coordinates: RouteCoordinate[];
+  steps: PlannedRouteStep[];
+};
+
+export type PlannedRouteStep = {
+  instruction: string;
+  distanceMeters: number | null;
   coordinates: RouteCoordinate[];
 };
 

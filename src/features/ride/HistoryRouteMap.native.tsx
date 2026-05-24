@@ -7,7 +7,11 @@ import MapView, {
   type LatLng,
 } from 'react-native-maps';
 
-import { type ThemeColors, useThemeColors } from '../settings/settings';
+import {
+  type ThemeColors,
+  useResolvedTheme,
+  useThemeColors,
+} from '../settings/settings';
 import type { RidePoint } from './types';
 
 function toCoordinate(point: RidePoint): LatLng {
@@ -49,6 +53,7 @@ function getInitialRegion(coordinates: LatLng[]) {
 export function HistoryRouteMap({ points }: { points: RidePoint[] }) {
   const mapRef = useRef<MapView | null>(null);
   const colors = useThemeColors();
+  const resolvedTheme = useResolvedTheme();
   const styles = createStyles(colors);
   const coordinates = useMemo(() => points.map(toCoordinate), [points]);
   const hasGoogleMapsApiKey = Boolean(
@@ -95,9 +100,11 @@ export function HistoryRouteMap({ points }: { points: RidePoint[] }) {
   return (
     <View style={styles.container} pointerEvents="none">
       <MapView
+        key={resolvedTheme}
         ref={mapRef}
         style={styles.map}
         provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+        userInterfaceStyle={resolvedTheme}
         initialRegion={getInitialRegion(coordinates)}
         pitchEnabled={false}
         rotateEnabled={false}

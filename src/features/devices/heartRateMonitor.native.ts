@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react';
 import { PermissionsAndroid, Platform } from 'react-native';
-import {
-  BleManager,
-  ScanMode,
-  State,
-  type CharacteristicSubscriptionType,
-  type Device,
-  type Subscription,
+import type {
+  BleManager as BleManagerInstance,
+  CharacteristicSubscriptionType,
+  Device,
+  Subscription,
 } from 'react-native-ble-plx';
 
 import type { HeartRateDevice } from '../ride/types';
@@ -22,11 +20,23 @@ const HEART_RATE_SERVICE_SHORT_UUID = '180d';
 const HEART_RATE_MEASUREMENT_SHORT_UUID = '2a37';
 const SCAN_TIMEOUT_MS = 10000;
 const HEART_RATE_MONITOR_TRANSACTION_ID = 'pelot-heart-rate-monitor';
+const BLE_UNAVAILABLE_MESSAGE =
+  'Bluetooth heart rate requires a native build with react-native-ble-plx.';
 
-let manager: BleManager | null = null;
+let manager: BleManagerInstance | null = null;
 
-function getManager() {
-  manager ??= new BleManager();
+async function getManager() {
+  if (manager) {
+    return manager;
+  }
+
+  try {
+    const { BleManager } = await import('react-native-ble-plx');
+
+    manager = new BleManager();
+  } catch {
+    return null;
+  }
 
   return manager;
 }
@@ -62,14 +72,19 @@ export async function requestHeartRateBluetoothAccess(): Promise<BluetoothAccess
     return 'denied';
   }
 
-  const bleManager = getManager();
+  const bleManager = await getManager();
+
+  if (!bleManager) {
+    return 'unavailable';
+  }
+
   const state = await bleManager.state();
 
-  if (state === State.PoweredOn) {
+  if (state === 'PoweredOn') {
     return 'granted';
   }
 
-  if (state === State.PoweredOff && Platform.OS === 'android') {
+  if (state === 'PoweredOff' && Platform.OS === 'android') {
     try {
       await bleManager.enable();
       return 'granted';
@@ -78,7 +93,7 @@ export async function requestHeartRateBluetoothAccess(): Promise<BluetoothAccess
     }
   }
 
-  if (state === State.PoweredOff) {
+  if (state === 'PoweredOff') {
     return 'powered-off';
   }
 
@@ -180,7 +195,12 @@ export async function scanHeartRateDevices(): Promise<
     throw new Error('Bluetooth is not available right now.');
   }
 
-  const bleManager = getManager();
+  const bleManager = await getManager();
+
+  if (!bleManager) {
+    throw new Error(BLE_UNAVAILABLE_MESSAGE);
+  }
+
   const devices = new Map<string, ScannedHeartRateDevice>();
   bleManager.stopDeviceScan();
 
@@ -193,7 +213,7 @@ export async function scanHeartRateDevices(): Promise<
     bleManager
       .startDeviceScan(
         null,
-        { scanMode: ScanMode.LowLatency, legacyScan: false },
+        { scanMode: 2, legacyScan: false },
         (error, device) => {
           if (error) {
             clearTimeout(timeout);
@@ -253,7 +273,12 @@ export function useHeartRateMonitor(
       try {
         setState({ heartRateBpm: null, status: 'connecting', error: null });
 
-        const bleManager = getManager();
+        const bleManager = await getManager();
+
+        if (!bleManager) {
+          throw new Error(BLE_UNAVAILABLE_MESSAGE);
+        }
+
         bleManager.stopDeviceScan();
         const deviceId = device.id;
         const isAlreadyConnected = await bleManager.isDeviceConnected(deviceId);
@@ -358,7 +383,7 @@ export function useHeartRateMonitor(
 
     return () => {
       isMounted = false;
-      getManager().cancelTransaction(HEART_RATE_MONITOR_TRANSACTION_ID);
+      manager?.cancelTransaction(HEART_RATE_MONITOR_TRANSACTION_ID);
       monitorSubscription?.remove();
       disconnectDevice?.cancelConnection().catch(() => {});
     };

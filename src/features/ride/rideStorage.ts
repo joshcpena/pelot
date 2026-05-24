@@ -172,6 +172,15 @@ export async function loadRidePoints(rideId: string) {
   }));
 }
 
+export async function deleteRide(rideId: string) {
+  await initializeDatabase();
+  const db = await getDatabase();
+
+  await db.runAsync('DELETE FROM ride_splits WHERE ride_id = ?', rideId);
+  await db.runAsync('DELETE FROM ride_points WHERE ride_id = ?', rideId);
+  await db.runAsync('DELETE FROM rides WHERE id = ?', rideId);
+}
+
 export function calculateMetricsFromPoints(points: RidePoint[]): RideMetrics {
   let distanceMeters = 0;
   let ascentMeters = 0;
@@ -219,6 +228,7 @@ export function calculateMetricsFromPoints(points: RidePoint[]): RideMetrics {
     lapNumber: 1,
     lapStartedAt: points[0]?.recordedAt ?? null,
     lapElapsedSeconds: elapsedSeconds,
+    lapPausedSeconds: 0,
     lapMovingSeconds: movingSeconds,
     lapDistanceMeters: distanceMeters,
     lapAscentMeters: ascentMeters,

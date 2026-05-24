@@ -3,14 +3,25 @@ import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, {
+  Marker,
   PROVIDER_GOOGLE,
   Polyline,
   type LatLng,
   type MapType,
 } from 'react-native-maps';
 
-import { type ThemeColors, useThemeColors } from '../settings/settings';
-import type { PlannedRoute, RidePoint, RideSettings } from './types';
+import {
+  type ThemeColors,
+  useResolvedTheme,
+  useThemeColors,
+} from '../settings/settings';
+import type {
+  DestinationOption,
+  PlannedRoute,
+  PlannedRouteStep,
+  RidePoint,
+  RideSettings,
+} from './types';
 
 function toCoordinate(point: { latitude: number; longitude: number }): LatLng {
   return {
@@ -36,44 +47,7 @@ const DEFAULT_COORDINATE = {
   longitude: -122.4324,
 };
 
-const NAVIGATION_MAP_STYLE = [
-  {
-    featureType: 'poi',
-    stylers: [{ visibility: 'off' }],
-  },
-  {
-    featureType: 'transit',
-    stylers: [{ visibility: 'off' }],
-  },
-  {
-    featureType: 'road',
-    elementType: 'geometry',
-    stylers: [{ color: '#ffffff' }],
-  },
-  {
-    featureType: 'road.arterial',
-    elementType: 'geometry',
-    stylers: [{ color: '#e8eef7' }],
-  },
-  {
-    featureType: 'road.highway',
-    elementType: 'geometry',
-    stylers: [{ color: '#d7e5f6' }],
-  },
-  {
-    featureType: 'road',
-    elementType: 'labels.icon',
-    stylers: [{ visibility: 'off' }],
-  },
-  {
-    featureType: 'landscape',
-    stylers: [{ color: '#f5f7fb' }],
-  },
-  {
-    featureType: 'water',
-    stylers: [{ color: '#cfe8ff' }],
-  },
-];
+const MANEUVER_COMPLETE_DISTANCE_METERS = 35;
 
 function getHeading(points: RidePoint[]) {
   const lastPoint = points[points.length - 1];
@@ -85,18 +59,90 @@ function getHeading(points: RidePoint[]) {
   return 0;
 }
 
+function distanceBetweenCoordinates(a: LatLng, b: LatLng) {
+  const earthRadiusMeters = 6_371_000;
+  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+  const deltaLatitude = toRadians(b.latitude - a.latitude);
+  const deltaLongitude = toRadians(b.longitude - a.longitude);
+  const latitudeA = toRadians(a.latitude);
+  const latitudeB = toRadians(b.latitude);
+  const haversine =
+    Math.sin(deltaLatitude / 2) ** 2 +
+    Math.cos(latitudeA) *
+      Math.cos(latitudeB) *
+      Math.sin(deltaLongitude / 2) ** 2;
+
+  return (
+    earthRadiusMeters *
+    2 *
+    Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine))
+  );
+}
+
+function formatNavigationDistance(meters: number | null) {
+  if (meters == null) {
+    return '';
+  }
+
+  if (meters >= 1609.344) {
+    return `${(meters / 1609.344).toFixed(1)} mi`;
+  }
+
+  if (meters >= 100) {
+    return `${Math.round(meters / 10) * 10} m`;
+  }
+
+  return `${Math.max(5, Math.round(meters / 5) * 5)} m`;
+}
+
+function getStepEndCoordinate(step: PlannedRouteStep) {
+  return step.coordinates.at(-1) ?? null;
+}
+
+function getClosestRouteIndex(coordinate: LatLng, routeCoordinates: LatLng[]) {
+  return routeCoordinates.reduce(
+    (best, candidate, index) => {
+      const distanceMeters = distanceBetweenCoordinates(coordinate, candidate);
+
+      return distanceMeters < best.distanceMeters
+        ? { index, distanceMeters }
+        : best;
+    },
+    { index: 0, distanceMeters: Number.POSITIVE_INFINITY },
+  ).index;
+}
+
+function getStepEndIndexes(
+  routeCoordinates: LatLng[],
+  steps: PlannedRouteStep[],
+) {
+  return steps.map((step) => {
+    const endCoordinate = getStepEndCoordinate(step);
+
+    return endCoordinate
+      ? getClosestRouteIndex(endCoordinate, routeCoordinates)
+      : routeCoordinates.length - 1;
+  });
+}
+
 export function RideMap({
+  destinationOptions = [],
+  isNavigating = false,
   points,
   mapType,
   plannedRoute,
 }: {
+  destinationOptions?: DestinationOption[];
+  isNavigating?: boolean;
   points: RidePoint[];
   mapType: RideSettings['mapType'];
   plannedRoute?: PlannedRoute | null;
 }) {
   const mapRef = useRef<MapView | null>(null);
   const colors = useThemeColors();
+  const resolvedTheme = useResolvedTheme();
   const styles = createStyles(colors);
+  const isDarkTheme = resolvedTheme === 'dark';
   const [currentCoordinate, setCurrentCoordinate] = useState<LatLng | null>(
     null,
   );
@@ -107,6 +153,12 @@ export function RideMap({
   const needsGoogleMapsKey = Platform.OS === 'android';
   const coordinates = points.map(toCoordinate);
   const plannedCoordinates = plannedRoute?.coordinates;
+  const plannedStepEndIndexes = plannedRoute?.steps.length
+    ? getStepEndIndexes(plannedCoordinates ?? [], plannedRoute.steps)
+    : [];
+  const destinationCoordinates = destinationOptions.map(
+    (option) => option.coordinate,
+  );
   const lastPoint = points[points.length - 1];
   const lastLatitude = lastPoint?.latitude;
   const lastLongitude = lastPoint?.longitude;
@@ -116,6 +168,15 @@ export function RideMap({
       : null;
   const mapCenter = lastCoordinate ?? currentCoordinate ?? DEFAULT_COORDINATE;
   const mapHeading = getHeading(points);
+  const activeNavigationStep =
+    isNavigating && plannedRoute && lastCoordinate && plannedCoordinates?.length
+      ? getActiveNavigationStep(
+          lastCoordinate,
+          plannedCoordinates,
+          plannedRoute.steps,
+          plannedStepEndIndexes,
+        )
+      : null;
 
   useEffect(() => {
     let isMounted = true;
@@ -157,10 +218,10 @@ export function RideMap({
     mapRef.current?.animateCamera({
       center: { latitude: lastLatitude, longitude: lastLongitude },
       heading: mapHeading,
-      pitch: 45,
-      zoom: 17,
+      pitch: isNavigating ? 60 : 45,
+      zoom: isNavigating ? 18 : 17,
     });
-  }, [lastLatitude, lastLongitude, mapHeading]);
+  }, [isNavigating, lastLatitude, lastLongitude, mapHeading]);
 
   useEffect(() => {
     if (
@@ -193,6 +254,30 @@ export function RideMap({
     });
   }, [coordinates.length, plannedCoordinates]);
 
+  useEffect(() => {
+    if (
+      coordinates.length > 1 ||
+      plannedCoordinates ||
+      destinationCoordinates.length === 0
+    ) {
+      return;
+    }
+
+    if (destinationCoordinates.length === 1) {
+      mapRef.current?.animateCamera({
+        center: destinationCoordinates[0],
+        pitch: 0,
+        zoom: 15,
+      });
+      return;
+    }
+
+    mapRef.current?.fitToCoordinates(destinationCoordinates, {
+      animated: true,
+      edgePadding: { top: 72, right: 48, bottom: 300, left: 48 },
+    });
+  }, [coordinates.length, destinationCoordinates, plannedCoordinates]);
+
   function recenterMap() {
     mapRef.current?.animateCamera({
       center: mapCenter,
@@ -217,6 +302,49 @@ export function RideMap({
     });
   }
 
+  function getActiveNavigationStep(
+    coordinate: LatLng,
+    routeCoordinates: LatLng[],
+    steps: PlannedRouteStep[],
+    stepEndIndexes: number[],
+  ) {
+    if (steps.length === 0 || routeCoordinates.length === 0) {
+      return null;
+    }
+
+    const closestRouteIndex = getClosestRouteIndex(
+      coordinate,
+      routeCoordinates,
+    );
+    const currentStepIndex = stepEndIndexes.findIndex(
+      (endIndex, index) =>
+        endIndex >= closestRouteIndex - 2 || index === steps.length - 1,
+    );
+    const stepIndex =
+      currentStepIndex < 0 ? steps.length - 1 : currentStepIndex;
+    const step = steps[stepIndex];
+    const endCoordinate = getStepEndCoordinate(step);
+    const distanceToManeuver = endCoordinate
+      ? distanceBetweenCoordinates(coordinate, endCoordinate)
+      : step.distanceMeters;
+    const displayStep =
+      distanceToManeuver != null &&
+      distanceToManeuver < MANEUVER_COMPLETE_DISTANCE_METERS &&
+      stepIndex < steps.length - 1
+        ? steps[stepIndex + 1]
+        : step;
+    const displayEndCoordinate = getStepEndCoordinate(displayStep);
+
+    return {
+      instruction: displayStep.instruction,
+      distanceText: formatNavigationDistance(
+        displayEndCoordinate
+          ? distanceBetweenCoordinates(coordinate, displayEndCoordinate)
+          : displayStep.distanceMeters,
+      ),
+    };
+  }
+
   if (needsGoogleMapsKey && (!hasGoogleMapsApiKey || isExpoGo)) {
     return (
       <View style={styles.fallbackContainer}>
@@ -239,11 +367,12 @@ export function RideMap({
   return (
     <View style={styles.container}>
       <MapView
+        key={resolvedTheme}
         ref={mapRef}
         style={styles.map}
         provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
         mapType={getMapType(mapType)}
-        customMapStyle={mapType === 'standard' ? NAVIGATION_MAP_STYLE : []}
+        userInterfaceStyle={resolvedTheme}
         showsUserLocation
         followsUserLocation={false}
         showsCompass
@@ -257,6 +386,20 @@ export function RideMap({
           longitudeDelta: 0.004,
         }}
       >
+        {!plannedRoute
+          ? destinationOptions.map((option, index) => (
+              <Marker
+                key={option.id}
+                coordinate={option.coordinate}
+                description={option.address ?? undefined}
+                title={`${index + 1}. ${option.name}`}
+              >
+                <View style={styles.destinationMarker}>
+                  <Text style={styles.destinationMarkerText}>{index + 1}</Text>
+                </View>
+              </Marker>
+            ))
+          : null}
         {plannedCoordinates && plannedCoordinates.length > 1 ? (
           <Polyline
             coordinates={plannedCoordinates}
@@ -286,6 +429,28 @@ export function RideMap({
         ) : null}
       </MapView>
       <View style={styles.mapHud} pointerEvents="box-none">
+        {activeNavigationStep ? (
+          <View
+            style={[
+              styles.navigationBanner,
+              !isDarkTheme && styles.navigationBannerLight,
+            ]}
+          >
+            {activeNavigationStep.distanceText ? (
+              <Text style={styles.navigationDistance}>
+                {activeNavigationStep.distanceText}
+              </Text>
+            ) : null}
+            <Text
+              style={[
+                styles.navigationInstruction,
+                !isDarkTheme && styles.navigationInstructionLight,
+              ]}
+            >
+              {activeNavigationStep.instruction}
+            </Text>
+          </View>
+        ) : null}
         <View style={styles.mapActions}>
           <Pressable style={styles.mapActionButton} onPress={recenterMap}>
             <Text style={styles.mapActionText}>Center</Text>
@@ -316,8 +481,41 @@ function createStyles(colors: ThemeColors) {
       left: 14,
       flexDirection: 'row',
       alignItems: 'flex-start',
-      justifyContent: 'flex-end',
+      justifyContent: 'space-between',
       gap: 12,
+    },
+    navigationBanner: {
+      flex: 1,
+      maxWidth: '76%',
+      borderRadius: 18,
+      backgroundColor: colors.inverseBackground,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+    },
+    navigationBannerLight: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: 'rgba(255, 255, 255, 0.96)',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 5 },
+      shadowOpacity: 0.12,
+      shadowRadius: 10,
+      elevation: 6,
+    },
+    navigationDistance: {
+      color: colors.accent,
+      fontSize: 14,
+      fontWeight: '900',
+    },
+    navigationInstruction: {
+      marginTop: 2,
+      color: colors.inverseText,
+      fontSize: 17,
+      fontWeight: '900',
+      lineHeight: 22,
+    },
+    navigationInstructionLight: {
+      color: colors.primaryText,
     },
     mapActions: {
       gap: 8,
@@ -333,6 +531,21 @@ function createStyles(colors: ThemeColors) {
     mapActionText: {
       color: '#0d1117',
       fontSize: 13,
+      fontWeight: '900',
+    },
+    destinationMarker: {
+      width: 34,
+      height: 34,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 3,
+      borderColor: '#fff',
+      borderRadius: 999,
+      backgroundColor: colors.accent,
+    },
+    destinationMarkerText: {
+      color: '#fff',
+      fontSize: 15,
       fontWeight: '900',
     },
     fallbackContainer: {

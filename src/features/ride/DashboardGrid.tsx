@@ -216,6 +216,8 @@ export function DashboardGrid({
       card.metricId === 'map' ? (
         <View style={styles.mapContent}>
           <RideMap
+            destinationOptions={context.destinationOptions}
+            isNavigating={context.isNavigating}
             points={context.routePoints}
             mapType={settings.mapType}
             plannedRoute={context.plannedRoute}
@@ -224,9 +226,11 @@ export function DashboardGrid({
       ) : (
         <MetricCardContent
           colors={colors}
+          metricId={card.metricId}
           label={metric.label}
+          columns={columns}
+          rows={rows}
           value={metric.getValue(context)}
-          isWide={columns === 3}
         />
       );
 
@@ -316,19 +320,23 @@ export function DashboardGrid({
     return card.metricId === 'map' ? (
       <View style={styles.mapContent}>
         <RideMap
+          destinationOptions={context.destinationOptions}
+          isNavigating={context.isNavigating}
           points={context.routePoints}
           mapType={settings.mapType}
           plannedRoute={context.plannedRoute}
         />
       </View>
     ) : (
-      <MetricCardContent
-        colors={colors}
-        label={metric.label}
-        value={metric.getValue(context)}
-        isWide={columns === 3}
-      />
-    );
+        <MetricCardContent
+          colors={colors}
+          metricId={card.metricId}
+          label={metric.label}
+          columns={columns}
+          rows={getSpanDimensions(card.span).rows}
+          value={metric.getValue(context)}
+        />
+      );
   }
 }
 
@@ -436,24 +444,46 @@ function EditDashboardCard({
 
 function MetricCardContent({
   colors,
+  columns,
   label,
+  metricId,
+  rows,
   value,
-  isWide,
 }: {
   colors: ThemeColors;
+  columns: number;
   label: string;
+  metricId: DashboardCard['metricId'];
+  rows: number;
   value: string;
-  isWide: boolean;
 }) {
   const styles = createStyles(colors);
+  const scale = Math.pow(columns * rows, 0.78);
+  const isHeartRateMessage =
+    metricId === 'heartRateCurrent' && !/^\d+\s*bpm$/i.test(value);
+  const valueFontSize = Math.min(
+    104,
+    Math.round(13 + scale * (isHeartRateMessage ? 3 : 11.5)),
+  );
+  const labelFontSize = Math.min(22, Math.round(8 + scale * 2.2));
 
   return (
-    <>
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text style={[styles.metricValue, isWide && styles.metricValueWide]}>
+    <View style={styles.metricContent}>
+      <Text
+        adjustsFontSizeToFit
+        numberOfLines={2}
+        style={[styles.metricLabel, { fontSize: labelFontSize }]}
+      >
+        {label}
+      </Text>
+      <Text
+        adjustsFontSizeToFit
+        numberOfLines={2}
+        style={[styles.metricValue, { fontSize: valueFontSize }]}
+      >
         {value}
       </Text>
-    </>
+    </View>
   );
 }
 
@@ -472,9 +502,16 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
     },
     metricCard: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
       justifyContent: 'center',
       backgroundColor: colors.card,
       padding: 8,
+    },
+    metricContent: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     editSlot: {
       backgroundColor: colors.background,
@@ -552,19 +589,16 @@ function createStyles(colors: ThemeColors) {
     },
     metricLabel: {
       color: colors.mutedText,
-      fontSize: 11,
       fontWeight: '800',
       letterSpacing: 0.8,
+      textAlign: 'center',
       textTransform: 'uppercase',
     },
     metricValue: {
-      marginTop: 2,
+      marginTop: 4,
       color: colors.primaryText,
-      fontSize: 18,
       fontWeight: '900',
-    },
-    metricValueWide: {
-      fontSize: 42,
+      textAlign: 'center',
     },
   });
 }
