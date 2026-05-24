@@ -17,6 +17,7 @@ import type {
   RidePoint,
   RideSettings,
 } from './types';
+import type { WeatherSample } from './weather';
 
 export type DashboardMetricCategory =
   | 'Calories'
@@ -46,6 +47,9 @@ export type DashboardValueContext = {
     | 'unavailable'
     | 'error';
   heartRateError: string | null;
+  deviceBatteryLevel: number | null;
+  currentWeather: WeatherSample | null;
+  weatherSamples: WeatherSample[];
 };
 
 export type DashboardMetricDefinition = {
@@ -92,35 +96,16 @@ export const defaultDashboardLayout: DashboardCard[] = [
 const allSpans = dashboardSpans;
 const metricSpans = dashboardSpans;
 const ELEVATION_CHANGE_THRESHOLD_METERS = 3;
-
-function unavailable() {
-  return '-!-';
-}
-
-function createUnavailableMetric(
-  id: DashboardMetricId,
-  label: string,
-  category: DashboardMetricCategory,
-  todo: string,
-): DashboardMetricDefinition {
-  void todo;
-  // TODO: Implement the metric described by the `todo` argument before replacing this placeholder.
-  return {
-    id,
-    label,
-    category,
-    supportedSpans: metricSpans,
-    defaultSpan: '1x1',
-    getValue: unavailable,
-  };
-}
+const KPH_TO_MPH = 0.621371;
 
 function getLapPoints({ metrics, routePoints }: DashboardValueContext) {
   if (metrics.lapStartedAt == null) {
     return routePoints;
   }
 
-  return routePoints.filter((point) => point.recordedAt >= metrics.lapStartedAt!);
+  return routePoints.filter(
+    (point) => point.recordedAt >= metrics.lapStartedAt!,
+  );
 }
 
 function getAltitudePoints(points: RidePoint[]) {
@@ -130,12 +115,16 @@ function getAltitudePoints(points: RidePoint[]) {
   );
 }
 
-function sumElevationChangeMeters(points: RidePoint[], direction: 'up' | 'down') {
+function sumElevationChangeMeters(
+  points: RidePoint[],
+  direction: 'up' | 'down',
+) {
   const altitudePoints = getAltitudePoints(points);
   let total = 0;
 
   for (let index = 1; index < altitudePoints.length; index += 1) {
-    const change = altitudePoints[index].altitude - altitudePoints[index - 1].altitude;
+    const change =
+      altitudePoints[index].altitude - altitudePoints[index - 1].altitude;
 
     if (direction === 'up' && change >= ELEVATION_CHANGE_THRESHOLD_METERS) {
       total += change;
@@ -197,6 +186,73 @@ function formatOptionalAscent(
 
 function formatGrade(value: number | null) {
   return value == null ? '--' : `${value.toFixed(1)}%`;
+}
+
+function formatBatteryLevel(level: number | null) {
+  return level == null ? '--' : `${Math.round(level * 100)}%`;
+}
+
+function formatTemperature(
+  temperatureC: number | null,
+  unitSystem: RideSettings['unitSystem'],
+) {
+  if (temperatureC == null) {
+    return '--';
+  }
+
+  if (unitSystem === 'metric') {
+    return `${Math.round(temperatureC)}°C`;
+  }
+
+  return `${Math.round((temperatureC * 9) / 5 + 32)}°F`;
+}
+
+function formatWindSpeed(
+  windSpeedKph: number | null,
+  unitSystem: RideSettings['unitSystem'],
+) {
+  if (windSpeedKph == null) {
+    return '--';
+  }
+
+  if (unitSystem === 'metric') {
+    return `${Math.round(windSpeedKph)} km/h`;
+  }
+
+  return `${Math.round(windSpeedKph * KPH_TO_MPH)} mph`;
+}
+
+function getWeatherSamplesForScope(
+  context: DashboardValueContext,
+  scope: 'ride' | 'lap',
+) {
+  if (scope === 'ride' || context.metrics.lapStartedAt == null) {
+    return context.weatherSamples;
+  }
+
+  return context.weatherSamples.filter(
+    (sample) => sample.recordedAt >= context.metrics.lapStartedAt!,
+  );
+}
+
+function getWeatherValue(
+  samples: WeatherSample[],
+  field: 'temperatureC' | 'windSpeedKph',
+  aggregation: 'average' | 'max' | 'min',
+) {
+  const values = samples
+    .map((sample) => sample[field])
+    .filter((value): value is number => value != null);
+
+  if (values.length === 0) {
+    return null;
+  }
+
+  if (aggregation === 'average') {
+    return values.reduce((total, value) => total + value, 0) / values.length;
+  }
+
+  return aggregation === 'max' ? Math.max(...values) : Math.min(...values);
 }
 
 function getSegmentGrades(points: RidePoint[]) {
@@ -383,12 +439,15 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
     defaultSpan: '1x1',
     getValue: ({ metrics }) => formatCalories(metrics.lapActiveCaloriesKcal),
   },
-  createUnavailableMetric(
-    'deviceBatteryLevel',
-    'Device Battery Level',
-    'Device',
-    'Read device battery using expo-battery.',
-  ),
+  {
+    id: 'deviceBatteryLevel',
+    label: 'Device Battery Level',
+    category: 'Device',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: ({ deviceBatteryLevel }) =>
+      formatBatteryLevel(deviceBatteryLevel),
+  },
   {
     id: 'totalDistance',
     label: 'Total Distance',
@@ -575,7 +634,8 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
     category: 'Elevation',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
-    getValue: ({ routePoints }) => formatGrade(getGradeExtreme(routePoints, 'max')),
+    getValue: ({ routePoints }) =>
+      formatGrade(getGradeExtreme(routePoints, 'max')),
   },
   {
     id: 'gradeMin',
@@ -583,7 +643,8 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
     category: 'Elevation',
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
-    getValue: ({ routePoints }) => formatGrade(getGradeExtreme(routePoints, 'min')),
+    getValue: ({ routePoints }) =>
+      formatGrade(getGradeExtreme(routePoints, 'min')),
   },
   {
     id: 'gradeLapMin',
@@ -779,7 +840,9 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
     getValue: ({ routePoints, metrics, now }) =>
-      formatTimeOfDay(getSunTime(routePoints, now ?? metrics.startedAt, 'sunrise')),
+      formatTimeOfDay(
+        getSunTime(routePoints, now ?? metrics.startedAt, 'sunrise'),
+      ),
   },
   {
     id: 'sunset',
@@ -788,86 +851,226 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
     supportedSpans: metricSpans,
     defaultSpan: '1x1',
     getValue: ({ routePoints, metrics, now }) =>
-      formatTimeOfDay(getSunTime(routePoints, now ?? metrics.startedAt, 'sunset')),
+      formatTimeOfDay(
+        getSunTime(routePoints, now ?? metrics.startedAt, 'sunset'),
+      ),
   },
-  createUnavailableMetric(
-    'temperatureCurrent',
-    'Current Temperature',
-    'Weather',
-    'Fetch current temperature from a weather provider.',
-  ),
-  createUnavailableMetric(
-    'temperatureAverage',
-    'Average Temp',
-    'Weather',
-    'Aggregate average temperature samples during a ride.',
-  ),
-  createUnavailableMetric(
-    'temperatureLapAverage',
-    'Lap Average Temp',
-    'Weather',
-    'Aggregate average temperature samples during a lap.',
-  ),
-  createUnavailableMetric(
-    'temperatureMax',
-    'Max Temp',
-    'Weather',
-    'Track maximum temperature sample during a ride.',
-  ),
-  createUnavailableMetric(
-    'temperatureLapMax',
-    'Lap Max Temp',
-    'Weather',
-    'Track maximum temperature sample during a lap.',
-  ),
-  createUnavailableMetric(
-    'temperatureMin',
-    'Min Temp',
-    'Weather',
-    'Track minimum temperature sample during a ride.',
-  ),
-  createUnavailableMetric(
-    'temperatureLapMin',
-    'Lap Min Temp',
-    'Weather',
-    'Track minimum temperature sample during a lap.',
-  ),
-  createUnavailableMetric(
-    'windCurrent',
-    'Current Wind',
-    'Weather',
-    'Fetch current wind from a weather provider.',
-  ),
-  createUnavailableMetric(
-    'windAverage',
-    'Average Wind',
-    'Weather',
-    'Aggregate average wind samples during a ride.',
-  ),
-  createUnavailableMetric(
-    'windLapAverage',
-    'Lap Average Wind',
-    'Weather',
-    'Aggregate average wind samples during a lap.',
-  ),
-  createUnavailableMetric(
-    'windMax',
-    'Max Wind',
-    'Weather',
-    'Track maximum wind sample during a ride.',
-  ),
-  createUnavailableMetric(
-    'windMin',
-    'Min Wind',
-    'Weather',
-    'Track minimum wind sample during a ride.',
-  ),
-  createUnavailableMetric(
-    'windLapMin',
-    'Lap Min Wind',
-    'Weather',
-    'Track minimum wind sample during a lap.',
-  ),
+  {
+    id: 'temperatureCurrent',
+    label: 'Current Temperature',
+    category: 'Weather',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: ({ currentWeather, settings }) =>
+      formatTemperature(
+        currentWeather?.temperatureC ?? null,
+        settings.unitSystem,
+      ),
+  },
+  {
+    id: 'temperatureAverage',
+    label: 'Average Temp',
+    category: 'Weather',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: (context) =>
+      formatTemperature(
+        getWeatherValue(
+          getWeatherSamplesForScope(context, 'ride'),
+          'temperatureC',
+          'average',
+        ),
+        context.settings.unitSystem,
+      ),
+  },
+  {
+    id: 'temperatureLapAverage',
+    label: 'Lap Average Temp',
+    category: 'Weather',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: (context) =>
+      formatTemperature(
+        getWeatherValue(
+          getWeatherSamplesForScope(context, 'lap'),
+          'temperatureC',
+          'average',
+        ),
+        context.settings.unitSystem,
+      ),
+  },
+  {
+    id: 'temperatureMax',
+    label: 'Max Temp',
+    category: 'Weather',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: (context) =>
+      formatTemperature(
+        getWeatherValue(
+          getWeatherSamplesForScope(context, 'ride'),
+          'temperatureC',
+          'max',
+        ),
+        context.settings.unitSystem,
+      ),
+  },
+  {
+    id: 'temperatureLapMax',
+    label: 'Lap Max Temp',
+    category: 'Weather',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: (context) =>
+      formatTemperature(
+        getWeatherValue(
+          getWeatherSamplesForScope(context, 'lap'),
+          'temperatureC',
+          'max',
+        ),
+        context.settings.unitSystem,
+      ),
+  },
+  {
+    id: 'temperatureMin',
+    label: 'Min Temp',
+    category: 'Weather',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: (context) =>
+      formatTemperature(
+        getWeatherValue(
+          getWeatherSamplesForScope(context, 'ride'),
+          'temperatureC',
+          'min',
+        ),
+        context.settings.unitSystem,
+      ),
+  },
+  {
+    id: 'temperatureLapMin',
+    label: 'Lap Min Temp',
+    category: 'Weather',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: (context) =>
+      formatTemperature(
+        getWeatherValue(
+          getWeatherSamplesForScope(context, 'lap'),
+          'temperatureC',
+          'min',
+        ),
+        context.settings.unitSystem,
+      ),
+  },
+  {
+    id: 'windCurrent',
+    label: 'Current Wind',
+    category: 'Weather',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: ({ currentWeather, settings }) =>
+      formatWindSpeed(
+        currentWeather?.windSpeedKph ?? null,
+        settings.unitSystem,
+      ),
+  },
+  {
+    id: 'windAverage',
+    label: 'Average Wind',
+    category: 'Weather',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: (context) =>
+      formatWindSpeed(
+        getWeatherValue(
+          getWeatherSamplesForScope(context, 'ride'),
+          'windSpeedKph',
+          'average',
+        ),
+        context.settings.unitSystem,
+      ),
+  },
+  {
+    id: 'windLapAverage',
+    label: 'Lap Average Wind',
+    category: 'Weather',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: (context) =>
+      formatWindSpeed(
+        getWeatherValue(
+          getWeatherSamplesForScope(context, 'lap'),
+          'windSpeedKph',
+          'average',
+        ),
+        context.settings.unitSystem,
+      ),
+  },
+  {
+    id: 'windMax',
+    label: 'Max Wind',
+    category: 'Weather',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: (context) =>
+      formatWindSpeed(
+        getWeatherValue(
+          getWeatherSamplesForScope(context, 'ride'),
+          'windSpeedKph',
+          'max',
+        ),
+        context.settings.unitSystem,
+      ),
+  },
+  {
+    id: 'windLapMax',
+    label: 'Lap Max Wind',
+    category: 'Weather',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: (context) =>
+      formatWindSpeed(
+        getWeatherValue(
+          getWeatherSamplesForScope(context, 'lap'),
+          'windSpeedKph',
+          'max',
+        ),
+        context.settings.unitSystem,
+      ),
+  },
+  {
+    id: 'windMin',
+    label: 'Min Wind',
+    category: 'Weather',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: (context) =>
+      formatWindSpeed(
+        getWeatherValue(
+          getWeatherSamplesForScope(context, 'ride'),
+          'windSpeedKph',
+          'min',
+        ),
+        context.settings.unitSystem,
+      ),
+  },
+  {
+    id: 'windLapMin',
+    label: 'Lap Min Wind',
+    category: 'Weather',
+    supportedSpans: metricSpans,
+    defaultSpan: '1x1',
+    getValue: (context) =>
+      formatWindSpeed(
+        getWeatherValue(
+          getWeatherSamplesForScope(context, 'lap'),
+          'windSpeedKph',
+          'min',
+        ),
+        context.settings.unitSystem,
+      ),
+  },
   {
     id: 'heartRateCurrent',
     label: 'Current Heart Rate',

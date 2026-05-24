@@ -1,7 +1,5 @@
 require('dotenv/config');
 
-const googleMapsApiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-
 module.exports = {
   expo: {
     name: 'Pelot',
@@ -14,11 +12,6 @@ module.exports = {
     ios: {
       bundleIdentifier: 'com.josh.pelot',
       supportsTablet: true,
-      config: googleMapsApiKey
-        ? {
-            googleMapsApiKey,
-          }
-        : undefined,
       infoPlist: {
         NSLocationWhenInUseUsageDescription:
           'Pelot uses your location to record bike rides, calculate speed and distance, and draw your route.',
@@ -43,6 +36,7 @@ module.exports = {
         'BLUETOOTH_ADMIN',
         'BLUETOOTH_SCAN',
         'BLUETOOTH_CONNECT',
+        'RECEIVE_BOOT_COMPLETED',
       ],
       adaptiveIcon: {
         backgroundColor: '#E6F4FE',
@@ -52,15 +46,18 @@ module.exports = {
       },
       predictiveBackGestureEnabled: false,
     },
-    extra: {
-      hasGoogleMapsApiKey: Boolean(googleMapsApiKey),
-    },
     web: {
       favicon: './assets/favicon.png',
+    },
+    extra: {
+      eas: {
+        projectId: '10e04dbe-8722-4761-9f1d-fd590abf7b5a',
+      },
     },
     plugins: [
       'expo-router',
       'expo-sqlite',
+      '@maplibre/maplibre-react-native',
       [
         'expo-location',
         {

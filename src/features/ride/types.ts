@@ -6,6 +6,8 @@ export type GpsAccuracyPreference = 'balanced' | 'best';
 
 export type SplitType = 'distance' | 'time';
 
+export type RouteProfile = 'bike' | 'roadbike' | 'mtb';
+
 export type RideStatus = 'idle' | 'recording' | 'paused' | 'stopped';
 
 export type RiderSex = 'female' | 'male';
@@ -129,6 +131,7 @@ export type DashboardMetricId =
   | 'windAverage'
   | 'windLapAverage'
   | 'windMax'
+  | 'windLapMax'
   | 'windMin'
   | 'windLapMin'
   | 'heartRateCurrent';
@@ -161,6 +164,7 @@ export type PlannedRoute = {
 
 export type PlannedRouteStep = {
   instruction: string;
+  streetName: string | null;
   distanceMeters: number | null;
   coordinates: RouteCoordinate[];
 };
@@ -168,6 +172,7 @@ export type PlannedRouteStep = {
 export type RideSettings = {
   unitSystem: UnitSystem;
   keepAwakeDuringRide: boolean;
+  autoDimScreen: boolean;
   autoPause: boolean;
   autoLap: boolean;
   ascentSource: AscentSource;
@@ -176,7 +181,8 @@ export type RideSettings = {
   splitDistanceMeters: number;
   splitDurationSeconds: number;
   theme: 'system' | 'light' | 'dark';
-  mapType: 'standard' | 'satellite' | 'hybrid';
+  mapType: 'standard' | 'outdoor' | 'satellite' | 'hybrid';
+  routeProfile: RouteProfile;
   dashboardLayout: DashboardCard[];
   connectedHeartRateDevice: HeartRateDevice | null;
   riderWeightKg: number | null;

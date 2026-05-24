@@ -119,19 +119,28 @@ export default function EditDashboardScreen() {
           </View>
           <View style={styles.editorActions}>
             <Pressable
-              style={styles.smallButton}
+              style={({ pressed }) => [
+                styles.smallButton,
+                pressed && styles.subtleButtonPressed,
+              ]}
               onPress={() => setMetricPickerCardId(item.id)}
             >
               <Text style={styles.smallButtonText}>Metric</Text>
             </Pressable>
             <Pressable
-              style={styles.smallButton}
+              style={({ pressed }) => [
+                styles.smallButton,
+                pressed && styles.subtleButtonPressed,
+              ]}
               onPress={() => setSizePickerCardId(item.id)}
             >
               <Text style={styles.smallButtonText}>Size</Text>
             </Pressable>
             <Pressable
-              style={styles.removeButton}
+              style={({ pressed }) => [
+                styles.removeButton,
+                pressed && styles.dangerButtonPressed,
+              ]}
               onPress={() => removeCard(item.id)}
             >
               <Text style={styles.removeButtonText}>Remove</Text>
@@ -149,20 +158,33 @@ export default function EditDashboardScreen() {
           <Text style={styles.kicker}>Dashboard</Text>
           <Text style={styles.title}>Edit Metrics</Text>
         </View>
-        <Link href="/menu" style={styles.closeLink}>
-          Done
+        <Link href="/menu" asChild>
+          <Pressable
+            style={({ pressed }) => [
+              styles.closeButton,
+              pressed && styles.subtleButtonPressed,
+            ]}
+          >
+            <Text style={styles.closeLink}>Done</Text>
+          </Pressable>
         </Link>
       </View>
 
       <View style={styles.toolbar}>
         <Pressable
-          style={styles.primaryButton}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            pressed && styles.primaryButtonPressed,
+          ]}
           onPress={() => setMetricPickerCardId('new')}
         >
           <Text style={styles.primaryButtonText}>Add metric</Text>
         </Pressable>
         <Pressable
-          style={styles.secondaryButton}
+          style={({ pressed }) => [
+            styles.secondaryButton,
+            pressed && styles.subtleButtonPressed,
+          ]}
           onPress={() => persist(defaultDashboardLayout)}
         >
           <Text style={styles.secondaryButtonText}>Reset</Text>
@@ -211,7 +233,10 @@ function MetricPickerModal({
       <ScrollView style={styles.modal} contentContainerStyle={styles.modalBody}>
         <View style={styles.modalHeader}>
           <Text style={styles.modalTitle}>Choose Metric</Text>
-          <Pressable onPress={onClose}>
+          <Pressable
+            style={({ pressed }) => pressed && styles.linkButtonPressed}
+            onPress={onClose}
+          >
             <Text style={styles.closeLink}>Close</Text>
           </Pressable>
         </View>
@@ -223,7 +248,10 @@ function MetricPickerModal({
               .map((metric) => (
                 <Pressable
                   key={metric.id}
-                  style={styles.pickerRow}
+                  style={({ pressed }) => [
+                    styles.pickerRow,
+                    pressed && styles.listButtonPressed,
+                  ]}
                   onPress={() => onSelect(metric.id)}
                 >
                   <Text style={styles.pickerLabel}>{metric.label}</Text>
@@ -265,7 +293,10 @@ function SizePickerModal({
         <View style={styles.sizeCard}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Choose Size</Text>
-            <Pressable onPress={onClose}>
+            <Pressable
+              style={({ pressed }) => pressed && styles.linkButtonPressed}
+              onPress={onClose}
+            >
               <Text style={styles.closeLink}>Close</Text>
             </Pressable>
           </View>
@@ -273,9 +304,11 @@ function SizePickerModal({
             {spans.map((span) => (
               <Pressable
                 key={span}
-                style={[
+                style={({ pressed }) => [
                   styles.spanButton,
                   card?.span === span && styles.spanButtonSelected,
+                  pressed && styles.subtleButtonPressed,
+                  pressed && card?.span === span && styles.selectedButtonPressed,
                 ]}
                 onPress={() => onSelect(span)}
               >
@@ -327,6 +360,32 @@ function createStyles(colors: ThemeColors) {
       color: colors.accent,
       fontSize: 16,
       fontWeight: '800',
+    },
+    closeButton: {
+      borderRadius: 999,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+    },
+    primaryButtonPressed: {
+      opacity: 0.78,
+      transform: [{ scale: 0.97 }],
+    },
+    subtleButtonPressed: {
+      backgroundColor: colors.accentSoft,
+      opacity: 0.82,
+      transform: [{ scale: 0.98 }],
+    },
+    selectedButtonPressed: {
+      opacity: 0.82,
+      transform: [{ scale: 0.98 }],
+    },
+    listButtonPressed: {
+      borderColor: colors.accent,
+      backgroundColor: colors.accentSoft,
+      transform: [{ scale: 0.99 }],
+    },
+    linkButtonPressed: {
+      opacity: 0.6,
     },
     toolbar: {
       flexDirection: 'row',
@@ -412,6 +471,10 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       backgroundColor: colors.danger,
       paddingVertical: 5,
+    },
+    dangerButtonPressed: {
+      opacity: 0.78,
+      transform: [{ scale: 0.96 }],
     },
     removeButtonText: {
       color: '#fff',

@@ -134,8 +134,15 @@ export default function HistoryScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <Text style={styles.title}>Ride History</Text>
-        <Link dismissTo href="/" style={styles.link}>
-          Back to ride
+        <Link dismissTo href="/" asChild>
+          <Pressable
+            style={({ pressed }) => [
+              styles.backToRideButton,
+              pressed && styles.linkPressed,
+            ]}
+          >
+            <Text style={styles.backToRideButtonText}>Back to ride</Text>
+          </Pressable>
         </Link>
       </View>
 
@@ -164,9 +171,16 @@ export default function HistoryScreen() {
                 pressed ? styles.deleteButtonPressed : null,
               ]}
             >
-              <Text style={styles.deleteButtonText}>
-                {deletingRideId === ride.id ? 'Deleting...' : 'Delete'}
-              </Text>
+              {({ pressed }) => (
+                <Text
+                  style={[
+                    styles.deleteButtonText,
+                    pressed && styles.deleteButtonTextPressed,
+                  ]}
+                >
+                  {deletingRideId === ride.id ? 'Deleting...' : 'Delete'}
+                </Text>
+              )}
             </Pressable>
           </View>
           <HistoryRouteMap points={pointsByRideId[ride.id] ?? []} />
@@ -273,11 +287,23 @@ function createStyles(colors: ThemeColors) {
       fontSize: 34,
       fontWeight: '900',
     },
-    link: {
+    backToRideButton: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    linkPressed: {
+      borderColor: colors.accent,
+      backgroundColor: colors.accentSoft,
+      opacity: 0.82,
+      transform: [{ scale: 0.98 }],
+    },
+    backToRideButtonText: {
       color: colors.accent,
-      fontSize: 16,
+      fontSize: 13,
       fontWeight: '900',
-      paddingTop: 5,
     },
     muted: {
       color: colors.mutedText,
@@ -309,12 +335,17 @@ function createStyles(colors: ThemeColors) {
       paddingVertical: 8,
     },
     deleteButtonPressed: {
-      opacity: 0.72,
+      backgroundColor: colors.danger,
+      opacity: 0.82,
+      transform: [{ scale: 0.96 }],
     },
     deleteButtonText: {
       color: colors.danger,
       fontSize: 13,
       fontWeight: '900',
+    },
+    deleteButtonTextPressed: {
+      color: '#fff',
     },
     grid: {
       flexDirection: 'row',

@@ -1,13 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
+import * as Brightness from 'expo-brightness';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Animated,
   Easing,
   Keyboard,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -45,6 +45,8 @@ import type {
 } from '../src/features/ride/types';
 import { useForegroundRideRecorder } from '../src/features/ride/useForegroundRideRecorder';
 import { useHeartRateMonitor } from '../src/features/devices/heartRateMonitor';
+import { useDeviceBatteryLevel } from '../src/features/devices/battery';
+import { useRideWeatherSamples } from '../src/features/ride/weather';
 
 const metricCategories: DashboardMetricCategory[] = [
   'Calories',
@@ -80,6 +82,78 @@ const navigationItems = [
   },
 ] as const;
 
+const OFF_ROUTE_DISTANCE_METERS = 75;
+const REROUTE_COOLDOWN_MS = 30_000;
+const AUTO_DIM_DELAY_MS = 30_000;
+const AUTO_DIM_BRIGHTNESS = 0.08;
+const STOP_HOLD_MS = 1000;
+
+function distanceBetweenCoordinates(a: RouteCoordinate, b: RouteCoordinate) {
+  const earthRadiusMeters = 6_371_000;
+  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+  const deltaLatitude = toRadians(b.latitude - a.latitude);
+  const deltaLongitude = toRadians(b.longitude - a.longitude);
+  const latitudeA = toRadians(a.latitude);
+  const latitudeB = toRadians(b.latitude);
+  const haversine =
+    Math.sin(deltaLatitude / 2) ** 2 +
+    Math.cos(latitudeA) *
+      Math.cos(latitudeB) *
+      Math.sin(deltaLongitude / 2) ** 2;
+
+  return (
+    earthRadiusMeters *
+    2 *
+    Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine))
+  );
+}
+
+function distanceToRouteMeters(
+  coordinate: RouteCoordinate,
+  routeCoordinates: RouteCoordinate[],
+) {
+  if (routeCoordinates.length === 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  if (routeCoordinates.length === 1) {
+    return distanceBetweenCoordinates(coordinate, routeCoordinates[0]);
+  }
+
+  const metersPerDegreeLatitude = 111_320;
+  const metersPerDegreeLongitude =
+    metersPerDegreeLatitude * Math.cos((coordinate.latitude * Math.PI) / 180);
+
+  return routeCoordinates.slice(0, -1).reduce((bestDistance, start, index) => {
+    const end = routeCoordinates[index + 1];
+    const startX =
+      (start.longitude - coordinate.longitude) * metersPerDegreeLongitude;
+    const startY =
+      (start.latitude - coordinate.latitude) * metersPerDegreeLatitude;
+    const endX =
+      (end.longitude - coordinate.longitude) * metersPerDegreeLongitude;
+    const endY = (end.latitude - coordinate.latitude) * metersPerDegreeLatitude;
+    const segmentX = endX - startX;
+    const segmentY = endY - startY;
+    const segmentLengthSquared = segmentX ** 2 + segmentY ** 2;
+    const projection =
+      segmentLengthSquared === 0
+        ? 0
+        : Math.max(
+            0,
+            Math.min(
+              1,
+              -(startX * segmentX + startY * segmentY) / segmentLengthSquared,
+            ),
+          );
+    const closestX = startX + segmentX * projection;
+    const closestY = startY + segmentY * projection;
+    const distance = Math.hypot(closestX, closestY);
+
+    return Math.min(bestDistance, distance);
+  }, Number.POSITIVE_INFINITY);
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   const { settings, updateSetting } = useRideSettings();
@@ -87,6 +161,12 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const styles = createStyles(colors);
   const recorder = useForegroundRideRecorder(settings);
+  const lastRouteOriginRef = useRef<RouteCoordinate | null>(null);
+  const rerouteInFlightRef = useRef(false);
+  const lastRerouteAtRef = useRef(0);
+  const autoDimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const brightnessBeforeDimRef = useRef<number | null>(null);
+  const stopHoldCompletedRef = useRef(false);
   const [isRoutePlannerOpen, setIsRoutePlannerOpen] = useState(false);
   const [isNavigationOpen, setIsNavigationOpen] = useState(false);
   const [destinationInput, setDestinationInput] = useState('');
@@ -96,9 +176,13 @@ export default function HomeScreen() {
   const [routeSearchOrigin, setRouteSearchOrigin] =
     useState<RouteCoordinate | null>(null);
   const [plannedRoute, setPlannedRoute] = useState<PlannedRoute | null>(null);
-  const [isSearchingDestinations, setIsSearchingDestinations] =
-    useState(false);
+  const [selectedDestination, setSelectedDestination] =
+    useState<DestinationOption | null>(null);
+  const [isSearchingDestinations, setIsSearchingDestinations] = useState(false);
   const [isPlanningRoute, setIsPlanningRoute] = useState(false);
+  const [isScreenDimmed, setIsScreenDimmed] = useState(false);
+  const [routePlannerKeyboardHeight, setRoutePlannerKeyboardHeight] =
+    useState(0);
   const [routePlanError, setRoutePlanError] = useState<string | null>(null);
   const [navigationPanelProgress] = useState(() => new Animated.Value(0));
   const [now, setNow] = useState<number | null>(null);
@@ -124,12 +208,197 @@ export default function HomeScreen() {
     settings.connectedHeartRateDevice,
     shouldConnectHeartRate,
   );
+  const deviceBatteryLevel = useDeviceBatteryLevel();
+  const weather = useRideWeatherSamples(recorder.routePoints, recorder.status);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
 
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!isPaused) {
+      stopFill.stopAnimation();
+      stopFill.setValue(0);
+    }
+  }, [isPaused, stopFill]);
+
+  function clearAutoDimTimer() {
+    if (autoDimTimerRef.current) {
+      clearTimeout(autoDimTimerRef.current);
+      autoDimTimerRef.current = null;
+    }
+  }
+
+  async function dimScreenForRide() {
+    if (brightnessBeforeDimRef.current == null) {
+      brightnessBeforeDimRef.current = await Brightness.getBrightnessAsync();
+    }
+
+    await Brightness.setBrightnessAsync(AUTO_DIM_BRIGHTNESS);
+    setIsScreenDimmed(true);
+  }
+
+  function scheduleAutoDim() {
+    clearAutoDimTimer();
+
+    if (!settings.autoDimScreen || recorder.status !== 'recording') {
+      return;
+    }
+
+    autoDimTimerRef.current = setTimeout(() => {
+      dimScreenForRide().catch(() => undefined);
+    }, AUTO_DIM_DELAY_MS);
+  }
+
+  async function restoreScreenBrightness() {
+    clearAutoDimTimer();
+
+    if (brightnessBeforeDimRef.current != null) {
+      await Brightness.setBrightnessAsync(brightnessBeforeDimRef.current);
+      brightnessBeforeDimRef.current = null;
+    }
+
+    setIsScreenDimmed(false);
+    scheduleAutoDim();
+  }
+
+  function handleRideScreenTouch() {
+    if (isScreenDimmed) {
+      restoreScreenBrightness().catch(() => undefined);
+      return;
+    }
+
+    scheduleAutoDim();
+  }
+
+  useEffect(() => {
+    clearAutoDimTimer();
+
+    if (!settings.autoDimScreen || recorder.status !== 'recording') {
+      const brightnessBeforeDim = brightnessBeforeDimRef.current;
+
+      if (brightnessBeforeDim != null) {
+        Brightness.setBrightnessAsync(brightnessBeforeDim)
+          .then(() => {
+            brightnessBeforeDimRef.current = null;
+            setIsScreenDimmed(false);
+          })
+          .catch(() => undefined);
+      }
+
+      return () => clearAutoDimTimer();
+    }
+
+    autoDimTimerRef.current = setTimeout(() => {
+      Brightness.getBrightnessAsync()
+        .then((brightness) => {
+          brightnessBeforeDimRef.current = brightness;
+          return Brightness.setBrightnessAsync(AUTO_DIM_BRIGHTNESS);
+        })
+        .then(() => setIsScreenDimmed(true))
+        .catch(() => undefined);
+    }, AUTO_DIM_DELAY_MS);
+
+    return () => clearAutoDimTimer();
+  }, [recorder.status, settings.autoDimScreen]);
+
+  useEffect(() => {
+    return () => {
+      clearAutoDimTimer();
+      if (brightnessBeforeDimRef.current != null) {
+        Brightness.setBrightnessAsync(brightnessBeforeDimRef.current).catch(
+          () => undefined,
+        );
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isRoutePlannerOpen) {
+      return;
+    }
+
+    const showSubscription = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (event) => setRoutePlannerKeyboardHeight(event.endCoordinates.height),
+    );
+    const hideSubscription = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setRoutePlannerKeyboardHeight(0),
+    );
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, [isRoutePlannerOpen]);
+
+  useEffect(() => {
+    if (
+      recorder.status !== 'recording' ||
+      !plannedRoute ||
+      !selectedDestination
+    ) {
+      return;
+    }
+
+    const latestPoint = recorder.routePoints.at(-1);
+
+    if (!latestPoint || plannedRoute.coordinates.length < 2) {
+      return;
+    }
+
+    const currentCoordinate = {
+      latitude: latestPoint.latitude,
+      longitude: latestPoint.longitude,
+    };
+    const distanceFromRoute = distanceToRouteMeters(
+      currentCoordinate,
+      plannedRoute.coordinates,
+    );
+
+    if (distanceFromRoute < OFF_ROUTE_DISTANCE_METERS) {
+      return;
+    }
+
+    const nowMs = Date.now();
+
+    if (
+      rerouteInFlightRef.current ||
+      nowMs - lastRerouteAtRef.current < REROUTE_COOLDOWN_MS
+    ) {
+      return;
+    }
+
+    rerouteInFlightRef.current = true;
+    lastRerouteAtRef.current = nowMs;
+
+    planBikeRoute({
+      destination: selectedDestination,
+      origin: currentCoordinate,
+      routeProfile: settings.routeProfile,
+    })
+      .then((route) => {
+        setPlannedRoute(route);
+        setRoutePlanError(null);
+      })
+      .catch((error) => {
+        setRoutePlanError(
+          error instanceof Error ? error.message : 'Could not reroute.',
+        );
+      })
+      .finally(() => {
+        rerouteInFlightRef.current = false;
+      });
+  }, [
+    plannedRoute,
+    recorder.routePoints,
+    recorder.status,
+    selectedDestination,
+    settings.routeProfile,
+  ]);
 
   function setDashboardLayoutDraft(nextLayout: DashboardCard[]) {
     setLayoutDraft(nextLayout);
@@ -202,14 +471,45 @@ export default function HomeScreen() {
       throw new Error('Location permission is required to plan a route.');
     }
 
-    const position = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced,
+    const lastRidePoint = recorder.routePoints.at(-1);
+
+    if (lastRidePoint) {
+      const origin = {
+        latitude: lastRidePoint.latitude,
+        longitude: lastRidePoint.longitude,
+      };
+      lastRouteOriginRef.current = origin;
+      return origin;
+    }
+
+    const lastKnownPosition = await Location.getLastKnownPositionAsync({
+      maxAge: 5 * 60 * 1000,
+      requiredAccuracy: 2000,
     });
 
-    return {
+    if (lastKnownPosition) {
+      const origin = {
+        latitude: lastKnownPosition.coords.latitude,
+        longitude: lastKnownPosition.coords.longitude,
+      };
+      lastRouteOriginRef.current = origin;
+      return origin;
+    }
+
+    if (lastRouteOriginRef.current) {
+      return lastRouteOriginRef.current;
+    }
+
+    const position = await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.Low,
+    });
+
+    const origin = {
       latitude: position.coords.latitude,
       longitude: position.coords.longitude,
     };
+    lastRouteOriginRef.current = origin;
+    return origin;
   }
 
   async function handleSearchDestinations() {
@@ -224,6 +524,7 @@ export default function HomeScreen() {
     setRoutePlanError(null);
     setIsSearchingDestinations(true);
     setPlannedRoute(null);
+    setSelectedDestination(null);
 
     try {
       const origin = await getRouteOrigin();
@@ -254,11 +555,14 @@ export default function HomeScreen() {
       const route = await planBikeRoute({
         destination,
         origin,
+        routeProfile: settings.routeProfile,
       });
 
       setPlannedRoute(route);
+      setSelectedDestination(destination);
       setDestinationOptions([]);
       setRouteSearchOrigin(null);
+      setRoutePlannerKeyboardHeight(0);
       setIsRoutePlannerOpen(false);
     } catch (error) {
       setRoutePlanError(
@@ -269,23 +573,50 @@ export default function HomeScreen() {
     }
   }
 
+  function cancelNavigation() {
+    setPlannedRoute(null);
+    setSelectedDestination(null);
+    setRouteSearchOrigin(null);
+    setDestinationOptions([]);
+    setRoutePlanError(null);
+  }
+
   function startStopHold() {
+    stopHoldCompletedRef.current = false;
+    stopFill.stopAnimation();
     stopFill.setValue(0);
     Animated.timing(stopFill, {
       toValue: 1,
-      duration: 1000,
+      duration: STOP_HOLD_MS,
       easing: Easing.linear,
       useNativeDriver: false,
-    }).start(({ finished }) => {
-      if (finished) {
-        recorder.stopRide();
-      }
-    });
+    }).start();
+  }
+
+  function completeStopHold() {
+    stopHoldCompletedRef.current = true;
+    stopFill.stopAnimation();
+    stopFill.setValue(0);
+    recorder.stopRide();
   }
 
   function cancelStopHold() {
-    stopFill.stopAnimation();
-    stopFill.setValue(0);
+    if (stopHoldCompletedRef.current) {
+      stopHoldCompletedRef.current = false;
+      stopFill.stopAnimation();
+      stopFill.setValue(0);
+      return;
+    }
+
+    stopFill.stopAnimation((value) => {
+      stopFill.setValue(value);
+      Animated.timing(stopFill, {
+        toValue: 0,
+        duration: 110,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start();
+    });
   }
 
   function openNavigationPanel() {
@@ -321,14 +652,15 @@ export default function HomeScreen() {
   }
 
   const routePlannerSheet = isRoutePlannerOpen ? (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      enabled={destinationOptions.length === 0}
+    <View
       pointerEvents={destinationOptions.length > 0 ? 'box-none' : 'auto'}
       style={[
         styles.routePlannerOverlay,
         styles.modalBackdrop,
         destinationOptions.length > 0 && styles.routeSelectionBackdrop,
+        destinationOptions.length === 0 && {
+          paddingBottom: routePlannerKeyboardHeight,
+        },
       ]}
     >
       <View style={styles.modalCard}>
@@ -337,7 +669,9 @@ export default function HomeScreen() {
           Enter a destination, pick the correct result on the map or list, then
           Pelot will draw the bike route here.
         </Text>
-        {routePlanError ? <Text style={styles.error}>{routePlanError}</Text> : null}
+        {routePlanError ? (
+          <Text style={styles.error}>{routePlanError}</Text>
+        ) : null}
         <TextInput
           autoCapitalize="words"
           autoCorrect={false}
@@ -360,12 +694,18 @@ export default function HomeScreen() {
               <Pressable
                 key={option.id}
                 disabled={isPlanningRoute}
-                style={styles.destinationOption}
+                style={({ pressed }) => [
+                  styles.destinationOption,
+                  pressed && styles.listButtonPressed,
+                  isPlanningRoute && styles.disabledButton,
+                ]}
                 onPress={() => handleSelectDestination(option)}
               >
                 <Text style={styles.destinationOptionIndex}>{index + 1}</Text>
                 <View style={styles.destinationOptionCopy}>
-                  <Text style={styles.destinationOptionName}>{option.name}</Text>
+                  <Text style={styles.destinationOptionName}>
+                    {option.name}
+                  </Text>
                   {option.address ? (
                     <Text style={styles.destinationOptionAddress}>
                       {option.address}
@@ -378,15 +718,25 @@ export default function HomeScreen() {
         ) : null}
         <View style={styles.modalActions}>
           <Pressable
-            style={styles.modalSecondaryButton}
-            onPress={() => setIsRoutePlannerOpen(false)}
+            style={({ pressed }) => [
+              styles.modalSecondaryButton,
+              pressed && styles.subtleButtonPressed,
+            ]}
+            onPress={() => {
+              setRoutePlannerKeyboardHeight(0);
+              setIsRoutePlannerOpen(false);
+            }}
           >
             <Text style={styles.secondaryButtonText}>Cancel</Text>
           </Pressable>
           <Pressable
             disabled={isSearchingDestinations || isPlanningRoute}
-            style={[
+            style={({ pressed }) => [
               styles.primaryButton,
+              pressed &&
+                !isSearchingDestinations &&
+                !isPlanningRoute &&
+                styles.primaryButtonPressed,
               isSearchingDestinations || isPlanningRoute
                 ? styles.disabledButton
                 : null,
@@ -403,7 +753,7 @@ export default function HomeScreen() {
           </Pressable>
         </View>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   ) : null;
 
   const navigationPanel = isNavigationOpen ? (
@@ -449,7 +799,10 @@ export default function HomeScreen() {
           </View>
           <Pressable
             accessibilityLabel="Close menu"
-            style={styles.navigationCloseButton}
+            style={({ pressed }) => [
+              styles.navigationCloseButton,
+              pressed && styles.subtleButtonPressed,
+            ]}
             onPress={closeNavigationPanel}
           >
             <Text style={styles.navigationCloseText}>Close</Text>
@@ -464,7 +817,7 @@ export default function HomeScreen() {
                 styles.navigationItem,
                 pressed ? styles.navigationItemPressed : null,
               ]}
-              onPressIn={() => navigateFromNavigationPanel(item.href)}
+              onPress={() => navigateFromNavigationPanel(item.href)}
             >
               <Text style={styles.navigationItemEyebrow}>{item.eyebrow}</Text>
               <Text style={styles.navigationItemTitle}>{item.title}</Text>
@@ -480,10 +833,13 @@ export default function HomeScreen() {
 
   return (
     <>
-      <View style={styles.container}>
+      <View style={styles.container} onTouchStart={handleRideScreenTouch}>
         <Pressable
           accessibilityLabel="Open menu"
-          style={styles.menuButton}
+          style={({ pressed }) => [
+            styles.menuButton,
+            pressed && styles.menuButtonPressed,
+          ]}
           onPress={openNavigationPanel}
         >
           <View style={styles.menuLine} />
@@ -509,17 +865,22 @@ export default function HomeScreen() {
                 routePoints: recorder.routePoints,
                 plannedRoute,
                 destinationOptions,
-                isNavigating: recorder.status === 'recording' && plannedRoute != null,
+                isNavigating:
+                  recorder.status === 'recording' && plannedRoute != null,
                 now,
                 heartRateBpm: heartRate.heartRateBpm,
                 heartRateStatus: heartRate.status,
                 heartRateError: heartRate.error,
+                deviceBatteryLevel,
+                currentWeather: weather.currentWeather,
+                weatherSamples: weather.weatherSamples,
               }}
               isEditing={isEditingDashboard}
               layout={displayedLayout}
               rowHeight={dashboardRowHeight}
               settings={settings}
               onAddCard={() => setMetricPickerCardId('new')}
+              onCancelNavigation={cancelNavigation}
               onLongPressCard={canStart ? enterDashboardEditMode : undefined}
               onMoveCard={moveDashboardCard}
               onPressCard={(card) => setSizePickerCardId(card.id)}
@@ -538,7 +899,7 @@ export default function HomeScreen() {
           <Text style={styles.error}>{routePlanError}</Text>
         ) : null}
 
-        {plannedRoute ? (
+        {plannedRoute && recorder.status !== 'recording' ? (
           <View style={styles.destinationCard}>
             <Text style={styles.metricLabel}>Planned bike route</Text>
             <Text style={styles.destinationValue}>
@@ -557,13 +918,19 @@ export default function HomeScreen() {
               Drag to reorder. Tap to customize.
             </Text>
             <Pressable
-              style={styles.editModeButton}
+              style={({ pressed }) => [
+                styles.editModeButton,
+                pressed && styles.subtleButtonPressed,
+              ]}
               onPress={() => setDashboardLayoutDraft(settings.dashboardLayout)}
             >
               <Text style={styles.editModeButtonText}>Reset</Text>
             </Pressable>
             <Pressable
-              style={styles.editModeDoneButton}
+              style={({ pressed }) => [
+                styles.editModeDoneButton,
+                pressed && styles.primaryButtonPressed,
+              ]}
               onPress={saveDashboardLayout}
             >
               <Text style={styles.editModeDoneButtonText}>Done</Text>
@@ -573,20 +940,50 @@ export default function HomeScreen() {
           <View style={styles.controls}>
             {canStart ? (
               <Pressable
-                style={styles.routeButton}
+                style={({ pressed }) => [
+                  styles.routeButton,
+                  pressed && styles.routeButtonPressed,
+                ]}
                 onPress={() => setIsRoutePlannerOpen(true)}
               >
-                <Text style={styles.routeButtonText}>Plan route</Text>
+                {({ pressed }) => (
+                  <Text
+                    style={[
+                      styles.routeButtonText,
+                      pressed && styles.routeButtonTextPressed,
+                    ]}
+                  >
+                    Plan route
+                  </Text>
+                )}
               </Pressable>
             ) : null}
             {isRecording ? (
-              <Pressable style={styles.routeButton} onPress={recorder.markLap}>
-                <Text style={styles.routeButtonText}>Lap</Text>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.routeButton,
+                  pressed && styles.routeButtonPressed,
+                ]}
+                onPress={recorder.markLap}
+              >
+                {({ pressed }) => (
+                  <Text
+                    style={[
+                      styles.routeButtonText,
+                      pressed && styles.routeButtonTextPressed,
+                    ]}
+                  >
+                    Lap
+                  </Text>
+                )}
               </Pressable>
             ) : null}
             {canStart ? (
               <Pressable
-                style={styles.primaryButton}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  pressed && styles.primaryButtonPressed,
+                ]}
                 onPress={recorder.startRide}
               >
                 <Text style={styles.primaryButtonText}>Start ride</Text>
@@ -594,15 +991,29 @@ export default function HomeScreen() {
             ) : null}
             {isRecording ? (
               <Pressable
-                style={styles.secondaryButton}
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  pressed && styles.dangerSoftButtonPressed,
+                ]}
                 onPress={recorder.pauseRide}
               >
-                <Text style={styles.secondaryButtonText}>Pause</Text>
+                {({ pressed }) => (
+                  <Text
+                    style={[
+                      styles.secondaryButtonText,
+                      pressed && styles.dangerSoftButtonTextPressed,
+                    ]}
+                  >
+                    Pause
+                  </Text>
+                )}
               </Pressable>
             ) : null}
             {isPaused ? (
               <Pressable
                 style={styles.holdStopButton}
+                delayLongPress={STOP_HOLD_MS}
+                onLongPress={completeStopHold}
                 onPressIn={startStopHold}
                 onPressOut={cancelStopHold}
               >
@@ -634,7 +1045,10 @@ export default function HomeScreen() {
             ) : null}
             {isPaused ? (
               <Pressable
-                style={styles.primaryButton}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  pressed && styles.primaryButtonPressed,
+                ]}
                 onPress={recorder.resumeRide}
               >
                 <Text style={styles.primaryButtonText}>Resume</Text>
@@ -647,6 +1061,15 @@ export default function HomeScreen() {
         {navigationPanel}
 
         <StatusBar style={settings.theme === 'light' ? 'dark' : 'light'} />
+        {isScreenDimmed ? (
+          <Pressable
+            accessibilityLabel="Restore screen brightness"
+            style={styles.dimWakeOverlay}
+            onPress={() => restoreScreenBrightness().catch(() => undefined)}
+          >
+            <Text style={styles.dimWakeText}>Tap to brighten</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <DashboardMetricPickerModal
@@ -666,7 +1089,6 @@ export default function HomeScreen() {
         }}
         onSelect={chooseDashboardSpan}
       />
-
     </>
   );
 }
@@ -689,7 +1111,10 @@ function DashboardMetricPickerModal({
       <ScrollView style={styles.modal} contentContainerStyle={styles.modalBody}>
         <View style={styles.modalHeader}>
           <Text style={styles.modalTitle}>Choose Metric</Text>
-          <Pressable onPress={onClose}>
+          <Pressable
+            style={({ pressed }) => pressed && styles.linkButtonPressed}
+            onPress={onClose}
+          >
             <Text style={styles.modalCloseLink}>Close</Text>
           </Pressable>
         </View>
@@ -701,7 +1126,10 @@ function DashboardMetricPickerModal({
               .map((metric) => (
                 <Pressable
                   key={metric.id}
-                  style={styles.pickerRow}
+                  style={({ pressed }) => [
+                    styles.pickerRow,
+                    pressed && styles.listButtonPressed,
+                  ]}
                   onPress={() => onSelect(metric.id)}
                 >
                   <Text style={styles.pickerLabel}>{metric.label}</Text>
@@ -746,17 +1174,32 @@ function DashboardSizePickerModal({
         <View style={styles.sizeModalCard}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Customize</Text>
-            <Pressable onPress={onClose}>
+            <Pressable
+              style={({ pressed }) => pressed && styles.linkButtonPressed}
+              onPress={onClose}
+            >
               <Text style={styles.modalCloseLink}>Close</Text>
             </Pressable>
           </View>
           <View style={styles.sizeOptions}>
             {card ? (
               <Pressable
-                style={styles.metricChangeButton}
+                style={({ pressed }) => [
+                  styles.metricChangeButton,
+                  pressed && styles.routeButtonPressed,
+                ]}
                 onPress={() => onChangeMetric(card.id)}
               >
-                <Text style={styles.metricChangeButtonText}>Change metric</Text>
+                {({ pressed }) => (
+                  <Text
+                    style={[
+                      styles.metricChangeButtonText,
+                      pressed && styles.routeButtonTextPressed,
+                    ]}
+                  >
+                    Change metric
+                  </Text>
+                )}
               </Pressable>
             ) : null}
             {spanHeights.map((height) => {
@@ -777,9 +1220,13 @@ function DashboardSizePickerModal({
                     {groupedSpans.map((span) => (
                       <Pressable
                         key={span}
-                        style={[
+                        style={({ pressed }) => [
                           styles.spanButton,
                           card?.span === span && styles.spanButtonSelected,
+                          pressed && styles.subtleButtonPressed,
+                          pressed &&
+                            card?.span === span &&
+                            styles.selectedButtonPressed,
                         ]}
                         onPress={() => onSelect(span)}
                       >
@@ -810,6 +1257,27 @@ function createStyles(colors: ThemeColors) {
     container: {
       flex: 1,
       backgroundColor: colors.background,
+    },
+    dimWakeOverlay: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(0, 0, 0, 0.08)',
+      zIndex: 50,
+    },
+    dimWakeText: {
+      overflow: 'hidden',
+      borderRadius: 999,
+      backgroundColor: 'rgba(0, 0, 0, 0.52)',
+      color: '#fff',
+      fontSize: 14,
+      fontWeight: '900',
+      paddingHorizontal: 18,
+      paddingVertical: 10,
     },
     dashboardArea: {
       flex: 1,
@@ -848,6 +1316,28 @@ function createStyles(colors: ThemeColors) {
       paddingHorizontal: 12,
       paddingVertical: 9,
     },
+    primaryButtonPressed: {
+      opacity: 0.78,
+      transform: [{ scale: 0.97 }],
+    },
+    subtleButtonPressed: {
+      borderColor: colors.accent,
+      backgroundColor: colors.accentSoft,
+      opacity: 0.82,
+      transform: [{ scale: 0.98 }],
+    },
+    selectedButtonPressed: {
+      opacity: 0.82,
+      transform: [{ scale: 0.98 }],
+    },
+    listButtonPressed: {
+      borderColor: colors.accent,
+      backgroundColor: colors.accentSoft,
+      transform: [{ scale: 0.99 }],
+    },
+    linkButtonPressed: {
+      opacity: 0.6,
+    },
     editModeDoneButtonText: {
       color: '#fff',
       fontSize: 12,
@@ -867,6 +1357,11 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.border,
       borderRadius: 16,
       backgroundColor: colors.card,
+    },
+    menuButtonPressed: {
+      borderColor: colors.accent,
+      backgroundColor: colors.accentSoft,
+      transform: [{ scale: 0.94 }],
     },
     menuLine: {
       width: 22,
@@ -955,7 +1450,9 @@ function createStyles(colors: ThemeColors) {
       padding: 16,
     },
     navigationItemPressed: {
-      opacity: 0.72,
+      borderColor: colors.accent,
+      backgroundColor: colors.accentSoft,
+      opacity: 0.88,
       transform: [{ scale: 0.99 }],
     },
     navigationItemEyebrow: {
@@ -1041,10 +1538,17 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.accentSoft,
       padding: 12,
     },
+    routeButtonPressed: {
+      borderColor: colors.accent,
+      backgroundColor: colors.accent,
+    },
     routeButtonText: {
       color: colors.accent,
       fontSize: 15,
       fontWeight: '900',
+    },
+    routeButtonTextPressed: {
+      color: '#fff',
     },
     primaryButtonText: {
       color: '#fff',
@@ -1061,10 +1565,18 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.dangerSoft,
       padding: 12,
     },
+    dangerSoftButtonPressed: {
+      borderColor: colors.danger,
+      backgroundColor: colors.danger,
+      transform: [{ scale: 0.97 }],
+    },
     secondaryButtonText: {
       color: colors.danger,
       fontSize: 15,
       fontWeight: '900',
+    },
+    dangerSoftButtonTextPressed: {
+      color: '#fff',
     },
     stopButton: {
       flex: 1,

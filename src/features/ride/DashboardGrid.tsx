@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   Animated,
+  Easing,
   PanResponder,
   Pressable,
   StyleSheet,
@@ -29,6 +30,8 @@ type DragState = {
   x: Animated.Value;
   y: Animated.Value;
 };
+
+const ENTER_EDIT_DELAY_MS = 550;
 
 function getOverlapArea(a: CardLayout, b: CardLayout) {
   const xOverlap = Math.max(
@@ -58,6 +61,7 @@ export function DashboardGrid({
   onLongPressCard,
   isEditing = false,
   onAddCard,
+  onCancelNavigation,
   onMoveCard,
   onPressCard,
   onRemoveCard,
@@ -70,6 +74,7 @@ export function DashboardGrid({
   onLongPressCard?: (card: DashboardCard) => void;
   isEditing?: boolean;
   onAddCard?: () => void;
+  onCancelNavigation?: () => void;
   onMoveCard?: (draggedCardId: string, targetCardId: string) => void;
   onPressCard?: (card: DashboardCard) => void;
   onRemoveCard?: (cardId: string) => void;
@@ -218,9 +223,11 @@ export function DashboardGrid({
           <RideMap
             destinationOptions={context.destinationOptions}
             isNavigating={context.isNavigating}
+            onCancelNavigation={onCancelNavigation}
             points={context.routePoints}
             mapType={settings.mapType}
             plannedRoute={context.plannedRoute}
+            unitSystem={settings.unitSystem}
           />
         </View>
       ) : (
@@ -255,18 +262,24 @@ export function DashboardGrid({
       );
     }
 
+    if (card.metricId === 'map') {
+      return (
+        <View key={card.id} style={[styles.cardShell, cardStyle]}>
+          {content}
+        </View>
+      );
+    }
+
     return (
-      <Pressable
+      <DashboardMetricCard
         key={card.id}
-        delayLongPress={1000}
-        onLongPress={onLongPressCard ? () => onLongPressCard(card) : undefined}
-        style={[
-          card.metricId === 'map' ? styles.cardShell : styles.metricCard,
-          cardStyle,
-        ]}
+        card={card}
+        cardStyle={cardStyle}
+        onLongPressCard={onLongPressCard}
+        styles={styles}
       >
         {content}
-      </Pressable>
+      </DashboardMetricCard>
     );
   });
 
@@ -274,7 +287,13 @@ export function DashboardGrid({
     <View style={styles.grid}>
       {cards}
       {isEditing ? (
-        <Pressable style={styles.addTile} onPress={onAddCard}>
+        <Pressable
+          style={({ pressed }) => [
+            styles.addTile,
+            pressed && styles.addTilePressed,
+          ]}
+          onPress={onAddCard}
+        >
           <Text style={styles.addTileIcon}>+</Text>
           <Text style={styles.addTileText}>Add metric</Text>
         </Pressable>
@@ -340,6 +359,88 @@ export function DashboardGrid({
   }
 }
 
+function DashboardMetricCard({
+  card,
+  cardStyle,
+  children,
+  onLongPressCard,
+  styles,
+}: {
+  card: DashboardCard;
+  cardStyle: { width: DimensionValue; height: number };
+  children: ReactNode;
+  onLongPressCard?: (card: DashboardCard) => void;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  const [holdFeedback] = useState(() => new Animated.Value(0));
+
+  function resetHoldFeedback() {
+    holdFeedback.stopAnimation();
+    Animated.timing(holdFeedback, {
+      toValue: 0,
+      duration: 90,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }
+
+  function startHoldFeedback() {
+    if (!onLongPressCard) {
+      return;
+    }
+
+    holdFeedback.stopAnimation();
+    holdFeedback.setValue(0);
+    Animated.timing(holdFeedback, {
+      toValue: 1,
+      duration: ENTER_EDIT_DELAY_MS,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }
+
+  return (
+    <Animated.View
+      style={[
+        styles.holdCard,
+        cardStyle,
+        {
+          transform: [
+            {
+              scale: holdFeedback.interpolate({
+                inputRange: [0, 1],
+                outputRange: [1, 0.975],
+              }),
+            },
+          ],
+        },
+      ]}
+    >
+      <Pressable
+        delayLongPress={ENTER_EDIT_DELAY_MS}
+        onLongPress={onLongPressCard ? () => onLongPressCard(card) : undefined}
+        onPressIn={startHoldFeedback}
+        onPressOut={resetHoldFeedback}
+        style={styles.metricCard}
+      >
+        {children}
+      </Pressable>
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.holdTapGlow,
+          {
+            opacity: holdFeedback.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 0.28],
+            }),
+          },
+        ]}
+      />
+    </Animated.View>
+  );
+}
+
 function EditDashboardCard({
   card,
   cardStyle,
@@ -373,6 +474,7 @@ function EditDashboardCard({
   const onMoveDragRef = useRef(onMoveDrag);
   const onPressCardRef = useRef(onPressCard);
   const onStartDragRef = useRef(onStartDrag);
+  const [editFeedback] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
     cardRef.current = card;
@@ -381,6 +483,26 @@ function EditDashboardCard({
     onPressCardRef.current = onPressCard;
     onStartDragRef.current = onStartDrag;
   }, [card, onEndDrag, onMoveDrag, onPressCard, onStartDrag]);
+
+  function playEditFeedback(nextCard: DashboardCard) {
+    editFeedback.stopAnimation();
+    editFeedback.setValue(0);
+
+    Animated.sequence([
+      Animated.timing(editFeedback, {
+        toValue: 1,
+        duration: 40,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(editFeedback, {
+        toValue: 0,
+        duration: 50,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start(() => onPressCardRef.current?.(nextCard));
+  }
 
   // PanResponder callbacks must stay stable; refs are only read from gesture events.
   // eslint-disable-next-line react-hooks/refs
@@ -407,7 +529,7 @@ function EditDashboardCard({
         onEndDragRef.current();
 
         if (!didDrag) {
-          onPressCardRef.current?.(cardRef.current);
+          playEditFeedback(cardRef.current);
         }
       },
       onPanResponderTerminate: () => onEndDragRef.current(),
@@ -419,20 +541,50 @@ function EditDashboardCard({
       onLayout={(event) => onLayout(card.id, event)}
       style={[styles.editSlot, cardStyle]}
     >
-      <Animated.View {...panResponder.panHandlers} style={styles.editResponder}>
+      <Animated.View
+        {...panResponder.panHandlers}
+        style={[
+          styles.editResponder,
+          {
+            transform: [
+              {
+                scale: editFeedback.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [1, 0.965],
+                }),
+              },
+            ],
+          },
+        ]}
+      >
         <Pressable
           style={[styles.editCard, isActive && styles.editCardPlaceholder]}
           onPressIn={() => onStartDrag(card)}
           onPress={() => {
             onEndDrag();
-            onPressCard?.(card);
+            playEditFeedback(card);
           }}
         >
           {children}
         </Pressable>
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.editTapGlow,
+            {
+              opacity: editFeedback.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, 0.22],
+              }),
+            },
+          ]}
+        />
         <Pressable
           accessibilityLabel={`Remove ${label}`}
-          style={styles.removeBadge}
+          style={({ pressed }) => [
+            styles.removeBadge,
+            pressed && styles.removeBadgePressed,
+          ]}
           onPress={() => onRemoveCard?.(card.id)}
         >
           <Text style={styles.removeBadgeText}>-</Text>
@@ -466,19 +618,23 @@ function MetricCardContent({
     Math.round(13 + scale * (isHeartRateMessage ? 3 : 11.5)),
   );
   const labelFontSize = Math.min(22, Math.round(8 + scale * 2.2));
+  const labelLineHeight = Math.round(labelFontSize * 1.15);
 
   return (
     <View style={styles.metricContent}>
       <Text
         adjustsFontSizeToFit
-        numberOfLines={2}
-        style={[styles.metricLabel, { fontSize: labelFontSize }]}
+        numberOfLines={1}
+        style={[
+          styles.metricLabel,
+          { fontSize: labelFontSize, lineHeight: labelLineHeight },
+        ]}
       >
         {label}
       </Text>
       <Text
         adjustsFontSizeToFit
-        numberOfLines={isHeartRateMessage ? 3 : 2}
+        numberOfLines={isHeartRateMessage ? 3 : 1}
         style={[
           styles.metricValue,
           isHeartRateMessage && styles.metricMessageValue,
@@ -507,10 +663,25 @@ function createStyles(colors: ThemeColors) {
       overflow: 'hidden',
       backgroundColor: colors.card,
     },
+    holdCard: {
+      overflow: 'hidden',
+      backgroundColor: colors.card,
+    },
+    holdTapGlow: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      borderWidth: 2,
+      borderColor: colors.accent,
+      backgroundColor: colors.accent,
+    },
     mapContent: {
       flex: 1,
     },
     metricCard: {
+      flex: 1,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
       justifyContent: 'center',
@@ -540,6 +711,16 @@ function createStyles(colors: ThemeColors) {
       opacity: 0.28,
       borderStyle: 'dashed',
     },
+    editTapGlow: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      borderWidth: 2,
+      borderColor: colors.accent,
+      backgroundColor: colors.accent,
+    },
     dragOverlay: {
       position: 'absolute',
       zIndex: 100,
@@ -567,6 +748,10 @@ function createStyles(colors: ThemeColors) {
       borderRadius: 999,
       backgroundColor: colors.danger,
     },
+    removeBadgePressed: {
+      opacity: 0.76,
+      transform: [{ scale: 0.9 }],
+    },
     removeBadgeText: {
       color: '#fff',
       fontSize: 20,
@@ -582,6 +767,11 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.border,
       borderStyle: 'dashed',
       backgroundColor: colors.background,
+    },
+    addTilePressed: {
+      borderColor: colors.accent,
+      backgroundColor: colors.accentSoft,
+      transform: [{ scale: 0.985 }],
     },
     addTileIcon: {
       color: colors.accent,
@@ -599,6 +789,7 @@ function createStyles(colors: ThemeColors) {
     metricLabel: {
       color: colors.mutedText,
       fontWeight: '800',
+      includeFontPadding: false,
       letterSpacing: 0.8,
       textAlign: 'center',
       textTransform: 'uppercase',
@@ -607,6 +798,7 @@ function createStyles(colors: ThemeColors) {
       marginTop: 4,
       color: colors.primaryText,
       fontWeight: '900',
+      includeFontPadding: false,
       textAlign: 'center',
     },
     metricMessageValue: {

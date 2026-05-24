@@ -1,58 +1,77 @@
 import type {
   DestinationOption,
   PlannedRoute,
+  RouteProfile,
   RouteCoordinate,
 } from './types';
 
-type PlacesTextSearchResponse = {
-  places?: {
+const openRouteServiceProfiles: Record<RouteProfile, string> = {
+  bike: 'cycling-regular',
+  roadbike: 'cycling-road',
+  mtb: 'cycling-mountain',
+};
+
+type MapTilerGeocodingResponse = {
+  features?: {
     id?: string;
-    displayName?: {
-      text?: string;
+    text?: string;
+    place_name?: string;
+    place_name_en?: string;
+    properties?: {
+      name?: string;
+      address?: string;
+      locality?: string;
+      region?: string;
+      country?: string;
     };
-    formattedAddress?: string;
-    location?: RouteCoordinate;
+    geometry?: {
+      coordinates?: [number, number, ...number[]];
+    };
   }[];
-  error?: {
-    message?: string;
-  };
+  message?: string;
+  error?: string;
 };
 
-type RoutesResponse = {
-  routes?: {
-    distanceMeters?: number;
-    duration?: string;
-    polyline?: {
-      encodedPolyline?: string;
+type OpenRouteServiceDirectionsResponse = {
+  features?: {
+    geometry?: {
+      coordinates?: [number, number, ...number[]][];
     };
-    legs?: {
-      steps?: {
-        distanceMeters?: number;
-        navigationInstruction?: {
-          instructions?: string;
-          maneuver?: string;
-        };
-        polyline?: {
-          encodedPolyline?: string;
-        };
+    properties?: {
+      summary?: {
+        distance?: number;
+        duration?: number;
+      };
+      segments?: {
+        steps?: {
+          distance?: number;
+          duration?: number;
+          instruction?: string;
+          name?: string;
+          way_points?: [number, number];
+        }[];
       }[];
-    }[];
+    };
   }[];
   error?: {
+    code?: number;
     message?: string;
   };
 };
 
-type GoogleErrorResponse = {
+type ApiErrorResponse = {
   error?: {
+    code?: number | string;
     message?: string;
-    status?: string;
   };
+  message?: string;
+  error_message?: string;
 };
 
 export type PlanBikeRouteInput = {
   destination: DestinationOption;
   origin: RouteCoordinate;
+  routeProfile: RouteProfile;
 };
 
 export type SearchDestinationsInput = {
@@ -60,44 +79,29 @@ export type SearchDestinationsInput = {
   origin: RouteCoordinate;
 };
 
-function decodePolyline(polyline: string): RouteCoordinate[] {
-  const coordinates: RouteCoordinate[] = [];
-  let index = 0;
-  let latitude = 0;
-  let longitude = 0;
+function toCoordinate(coordinate: [number, number, ...number[]]): RouteCoordinate {
+  return {
+    longitude: coordinate[0],
+    latitude: coordinate[1],
+  };
+}
 
-  while (index < polyline.length) {
-    let byte = 0;
-    let shift = 0;
-    let result = 0;
+function toLngLat(coordinate: RouteCoordinate) {
+  return [coordinate.longitude, coordinate.latitude];
+}
 
-    do {
-      byte = polyline.charCodeAt(index) - 63;
-      index += 1;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20);
+function getSearchBoundingBox(origin: RouteCoordinate, radiusMeters = 50000) {
+  const latitudeDelta = radiusMeters / 111_320;
+  const longitudeDelta =
+    radiusMeters /
+    (111_320 * Math.max(Math.cos((origin.latitude * Math.PI) / 180), 0.01));
 
-    latitude += result & 1 ? ~(result >> 1) : result >> 1;
-    shift = 0;
-    result = 0;
-
-    do {
-      byte = polyline.charCodeAt(index) - 63;
-      index += 1;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20);
-
-    longitude += result & 1 ? ~(result >> 1) : result >> 1;
-
-    coordinates.push({
-      latitude: latitude / 100000,
-      longitude: longitude / 100000,
-    });
-  }
-
-  return coordinates;
+  return [
+    origin.longitude - longitudeDelta,
+    origin.latitude - latitudeDelta,
+    origin.longitude + longitudeDelta,
+    origin.latitude + latitudeDelta,
+  ].join(',');
 }
 
 function formatDistance(meters: number | undefined) {
@@ -112,14 +116,12 @@ function formatDistance(meters: number | undefined) {
   return `${Math.round(meters)} m`;
 }
 
-function formatDuration(duration: string | undefined) {
-  const seconds = Number(duration?.replace(/s$/, ''));
-
+function formatDuration(seconds: number | undefined) {
   if (!Number.isFinite(seconds)) {
     return 'Unknown time';
   }
 
-  const roundedMinutes = Math.max(1, Math.round(seconds / 60));
+  const roundedMinutes = Math.max(1, Math.round((seconds ?? 0) / 60));
   const hours = Math.floor(roundedMinutes / 60);
   const minutes = roundedMinutes % 60;
 
@@ -134,14 +136,14 @@ function formatDuration(duration: string | undefined) {
   return `${minutes} min`;
 }
 
-async function getGoogleErrorMessage(response: Response, fallback: string) {
+async function getApiErrorMessage(response: Response, fallback: string) {
   try {
-    const body = (await response.json()) as GoogleErrorResponse;
-    const message = body.error?.message;
-    const status = body.error?.status;
+    const body = (await response.json()) as ApiErrorResponse;
+    const code = body.error?.code;
+    const message = body.error?.message ?? body.message ?? body.error_message;
 
-    if (message && status) {
-      return `${fallback} (${status}): ${message}`;
+    if (message && code) {
+      return `${fallback} (${code}): ${message}`;
     }
 
     if (message) {
@@ -154,14 +156,100 @@ async function getGoogleErrorMessage(response: Response, fallback: string) {
   return fallback;
 }
 
+async function fetchMapTilerGeocodingResults({
+  destination,
+  mapTilerApiKey,
+  origin,
+  types,
+}: {
+  destination: string;
+  mapTilerApiKey: string;
+  origin: RouteCoordinate;
+  types?: string;
+}) {
+  const url = new URL(
+    `https://api.maptiler.com/geocoding/${encodeURIComponent(destination)}.json`,
+  );
+  url.searchParams.set('key', mapTilerApiKey);
+  url.searchParams.set('limit', '8');
+  url.searchParams.set('proximity', `${origin.longitude},${origin.latitude}`);
+  url.searchParams.set('bbox', getSearchBoundingBox(origin));
+
+  if (types) {
+    url.searchParams.set('types', types);
+  }
+
+  const response = await fetch(url.toString());
+
+  if (!response.ok) {
+    throw new Error(
+      await getApiErrorMessage(response, 'MapTiler geocoding request failed'),
+    );
+  }
+
+  return (await response.json()) as MapTilerGeocodingResponse;
+}
+
+function toDestinationOptions(
+  results: MapTilerGeocodingResponse,
+  destination: string,
+) {
+  return (
+    results.features
+      ?.filter((feature) => feature.geometry?.coordinates)
+      .map((feature, index) => {
+        const coordinate = feature.geometry?.coordinates;
+        const address = getAddress(feature);
+
+        return {
+          id:
+            feature.id ??
+            `${coordinate?.[1] ?? 0},${coordinate?.[0] ?? 0},${index}`,
+          name: feature.text ?? feature.properties?.name ?? address ?? destination,
+          address,
+          coordinate: toCoordinate(coordinate as [number, number, ...number[]]),
+        };
+      }) ?? []
+  );
+}
+
+function dedupeDestinationOptions(options: DestinationOption[]) {
+  const seen = new Set<string>();
+
+  return options.filter((option) => {
+    const key = `${option.name}:${option.coordinate.latitude.toFixed(6)},${option.coordinate.longitude.toFixed(6)}`;
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function getAddress(feature: NonNullable<MapTilerGeocodingResponse['features']>[number]) {
+  const properties = feature.properties;
+  const structuredAddress = [
+    properties?.address,
+    properties?.locality,
+    properties?.region,
+    properties?.country,
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+  return (feature.place_name ?? feature.place_name_en ?? structuredAddress) || null;
+}
+
 export async function searchBikeDestinations({
   query,
   origin,
 }: SearchDestinationsInput): Promise<DestinationOption[]> {
-  const googleMapsApiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+  const mapTilerApiKey = process.env.EXPO_PUBLIC_MAPTILER_API_KEY;
 
-  if (!googleMapsApiKey) {
-    throw new Error('Set EXPO_PUBLIC_GOOGLE_MAPS_API_KEY to search places.');
+  if (!mapTilerApiKey) {
+    throw new Error('Set EXPO_PUBLIC_MAPTILER_API_KEY to search places.');
   }
 
   const destination = query.trim();
@@ -170,59 +258,27 @@ export async function searchBikeDestinations({
     return [];
   }
 
-  return searchDestinations(destination, origin, googleMapsApiKey);
-}
-
-async function searchDestinations(
-  destination: string,
-  origin: RouteCoordinate,
-  googleMapsApiKey: string,
-) {
-  const response = await fetch(
-    'https://places.googleapis.com/v1/places:searchText',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': googleMapsApiKey,
-        'X-Goog-FieldMask':
-          'places.id,places.displayName,places.formattedAddress,places.location',
-      },
-      body: JSON.stringify({
-        textQuery: destination,
-        locationBias: {
-          circle: {
-            center: origin,
-            radius: 50000,
-          },
-        },
-        maxResultCount: 8,
-      }),
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(
-      await getGoogleErrorMessage(response, 'Google Places request failed'),
-    );
-  }
-
-  const places = (await response.json()) as PlacesTextSearchResponse;
-  const options =
-    places.places
-      ?.filter((candidate) => candidate.location)
-      .map((place, index) => ({
-        id:
-          place.id ??
-          `${place.location?.latitude ?? 0},${place.location?.longitude ?? 0},${index}`,
-        name: place.displayName?.text ?? place.formattedAddress ?? destination,
-        address: place.formattedAddress ?? null,
-        coordinate: place.location as RouteCoordinate,
-      })) ?? [];
+  const [generalResults, poiResults] = await Promise.all([
+    fetchMapTilerGeocodingResults({ destination, mapTilerApiKey, origin }),
+    fetchMapTilerGeocodingResults({
+      destination,
+      mapTilerApiKey,
+      origin,
+      types: 'poi',
+    }),
+  ]);
+  const options = dedupeDestinationOptions([
+    ...toDestinationOptions(poiResults, destination),
+    ...toDestinationOptions(generalResults, destination),
+  ]).slice(0, 8);
 
   if (options.length === 0) {
     throw new Error(
-      places.error?.message ?? 'Google Places could not find that destination.',
+      generalResults.message ??
+        generalResults.error ??
+        poiResults.message ??
+        poiResults.error ??
+        'MapTiler could not find that destination.',
     );
   }
 
@@ -232,69 +288,81 @@ async function searchDestinations(
 export async function planBikeRoute({
   destination,
   origin,
+  routeProfile,
 }: PlanBikeRouteInput): Promise<PlannedRoute> {
-  const googleMapsApiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+  const openRouteServiceApiKey =
+    process.env.EXPO_PUBLIC_OPENROUTESERVICE_API_KEY;
 
-  if (!googleMapsApiKey) {
-    throw new Error('Set EXPO_PUBLIC_GOOGLE_MAPS_API_KEY to plan routes.');
+  if (!openRouteServiceApiKey) {
+    throw new Error(
+      'Set EXPO_PUBLIC_OPENROUTESERVICE_API_KEY to plan bike routes.',
+    );
   }
 
   const response = await fetch(
-    'https://routes.googleapis.com/directions/v2:computeRoutes',
+    `https://api.openrouteservice.org/v2/directions/${openRouteServiceProfiles[routeProfile]}/geojson`,
     {
       method: 'POST',
       headers: {
+        Accept: 'application/json, application/geo+json',
+        Authorization: openRouteServiceApiKey,
         'Content-Type': 'application/json',
-        'X-Goog-Api-Key': googleMapsApiKey,
-        'X-Goog-FieldMask':
-          'routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.steps.distanceMeters,routes.legs.steps.navigationInstruction,routes.legs.steps.polyline.encodedPolyline',
       },
       body: JSON.stringify({
-        origin: { location: { latLng: origin } },
-        destination: { location: { latLng: destination.coordinate } },
-        travelMode: 'BICYCLE',
-        computeAlternativeRoutes: false,
-        polylineQuality: 'HIGH_QUALITY',
-        polylineEncoding: 'ENCODED_POLYLINE',
+        coordinates: [toLngLat(origin), toLngLat(destination.coordinate)],
+        instructions: true,
+        options: {
+          avoid_features: ['steps', 'fords', 'ferries'],
+        },
+        preference: 'recommended',
+        units: 'm',
       }),
     },
   );
 
   if (!response.ok) {
     throw new Error(
-      await getGoogleErrorMessage(response, 'Google Routes request failed'),
+      await getApiErrorMessage(response, 'OpenRouteService route request failed'),
     );
   }
 
-  const routes = (await response.json()) as RoutesResponse;
-  const route = routes.routes?.[0];
-  const encodedPolyline = route?.polyline?.encodedPolyline;
+  const routes = (await response.json()) as OpenRouteServiceDirectionsResponse;
+  const route = routes.features?.[0];
+  const routeCoordinates = route?.geometry?.coordinates;
 
-  if (!route || !encodedPolyline) {
+  if (!route || !routeCoordinates || routeCoordinates.length < 2) {
     throw new Error(
-      routes.error?.message ?? 'Google could not plan a bicycling route.',
+      routes.error?.message ?? 'OpenRouteService could not plan a bicycling route.',
     );
   }
 
-  const coordinates = decodePolyline(encodedPolyline);
+  const coordinates = routeCoordinates.map(toCoordinate);
   const steps =
-    route.legs
-      ?.flatMap((leg) => leg.steps ?? [])
-      .map((step, index) => ({
-        instruction:
-          step.navigationInstruction?.instructions ??
-          step.navigationInstruction?.maneuver?.replace(/_/g, ' ') ??
-          (index === 0 ? `Head toward ${destination.name}` : 'Continue'),
-        distanceMeters: step.distanceMeters ?? null,
-        coordinates: step.polyline?.encodedPolyline
-          ? decodePolyline(step.polyline.encodedPolyline)
-          : [],
-      })) ?? [];
+    route.properties?.segments
+      ?.flatMap((segment) => segment.steps ?? [])
+      .map((step, index) => {
+        const wayPoints = step.way_points;
+        const stepCoordinates = wayPoints
+          ? coordinates.slice(wayPoints[0], wayPoints[1] + 1)
+          : [];
+
+        return {
+          instruction:
+            step.instruction ??
+            step.name ??
+            (index === 0 ? `Head toward ${destination.name}` : 'Continue'),
+          streetName: step.name?.trim() || null,
+          distanceMeters: step.distance ?? null,
+          coordinates: stepCoordinates,
+        };
+      }) ?? [];
+  const distanceMeters = route.properties?.summary?.distance;
+  const durationSeconds = route.properties?.summary?.duration;
 
   return {
     destination: destination.name,
-    distanceText: formatDistance(route.distanceMeters),
-    durationText: formatDuration(route.duration),
+    distanceText: formatDistance(distanceMeters),
+    durationText: formatDuration(durationSeconds),
     coordinates,
     steps:
       steps.length > 0
@@ -302,7 +370,8 @@ export async function planBikeRoute({
         : [
             {
               instruction: `Navigate to ${destination.name}`,
-              distanceMeters: route.distanceMeters ?? null,
+              streetName: destination.name,
+              distanceMeters: distanceMeters ?? null,
               coordinates,
             },
           ],

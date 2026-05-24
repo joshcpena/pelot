@@ -18,6 +18,7 @@ import type { RideSettings } from '../ride/types';
 export const defaultRideSettings: RideSettings = {
   unitSystem: 'imperial',
   keepAwakeDuringRide: true,
+  autoDimScreen: true,
   autoPause: false,
   autoLap: true,
   ascentSource: 'barometer-preferred',
@@ -27,6 +28,7 @@ export const defaultRideSettings: RideSettings = {
   splitDurationSeconds: 600,
   theme: 'system',
   mapType: 'standard',
+  routeProfile: 'bike',
   dashboardLayout: defaultDashboardLayout,
   connectedHeartRateDevice: null,
   riderWeightKg: null,

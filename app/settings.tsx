@@ -39,41 +39,18 @@ function OptionButton<T extends string>({
 
   return (
     <Pressable
-      style={[styles.optionButton, isSelected && styles.optionButtonSelected]}
-      onPress={() => onSelect(value)}
+      style={({ pressed }) => [
+        styles.optionButton,
+        isSelected && styles.optionButtonSelected,
+        pressed && styles.optionButtonPressed,
+        pressed && isSelected && styles.selectedButtonPressed,
+      ]}
+      onPressIn={() => onSelect(value)}
     >
       <Text
         style={[
           styles.optionButtonText,
           isSelected && styles.optionButtonTextSelected,
-        ]}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function ValueButton({
-  label,
-  selected,
-  onPress,
-  styles,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-  styles: ReturnType<typeof createStyles>;
-}) {
-  return (
-    <Pressable
-      style={[styles.optionButton, selected && styles.optionButtonSelected]}
-      onPress={onPress}
-    >
-      <Text
-        style={[
-          styles.optionButtonText,
-          selected && styles.optionButtonTextSelected,
         ]}
       >
         {label}
@@ -118,6 +95,45 @@ function parsePositiveNumber(value: string) {
   const parsed = Number(value);
 
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function clampSplitValue(value: number) {
+  return Math.min(100, Math.max(1, Math.round(value)));
+}
+
+function formatSplitValue(settings: RideSettings) {
+  const value =
+    settings.splitType === 'distance'
+      ? settings.unitSystem === 'imperial'
+        ? settings.splitDistanceMeters / 1609.344
+        : settings.splitDistanceMeters / 1000
+      : settings.splitDurationSeconds / 60;
+
+  return String(clampSplitValue(value));
+}
+
+function getMapTypeLabel(mapType: RideSettings['mapType']) {
+  switch (mapType) {
+    case 'hybrid':
+      return 'Hybrid';
+    case 'outdoor':
+      return 'Outdoor';
+    case 'satellite':
+      return 'Satellite';
+    case 'standard':
+      return 'Map';
+  }
+}
+
+function getRouteProfileLabel(routeProfile: RideSettings['routeProfile']) {
+  switch (routeProfile) {
+    case 'bike':
+      return 'Bike';
+    case 'mtb':
+      return 'MTB';
+    case 'roadbike':
+      return 'Roadbike';
+  }
 }
 
 export default function SettingsScreen() {
@@ -169,23 +185,38 @@ export default function SettingsScreen() {
     );
   }
 
-  const distancePresets =
-    settings.unitSystem === 'metric'
-      ? [
-          { label: '1 km', value: 1000 },
-          { label: '5 km', value: 5000 },
-          { label: '10 km', value: 10000 },
-        ]
-      : [
-          { label: '1 mi', value: 1609.344 },
-          { label: '5 mi', value: 8046.72 },
-          { label: '10 mi', value: 16093.44 },
-        ];
-  const timePresets = [
-    { label: '5 min', value: 300 },
-    { label: '10 min', value: 600 },
-    { label: '20 min', value: 1200 },
-  ];
+  function updateSplitValue(value: string) {
+    const sanitized = value.replace(/[^0-9]/g, '').slice(0, 3);
+
+    const parsed = Number(sanitized);
+
+    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 100) {
+      return;
+    }
+
+    const splitValue = clampSplitValue(parsed);
+
+    if (settings.splitType === 'distance') {
+      update(
+        'splitDistanceMeters',
+        settings.unitSystem === 'imperial'
+          ? splitValue * 1609.344
+          : splitValue * 1000,
+      );
+      return;
+    }
+
+    update('splitDurationSeconds', splitValue * 60);
+  }
+
+  function commitSplitValue(value: string) {
+    const parsed = Number(value);
+    const splitValue = Number.isFinite(parsed)
+      ? clampSplitValue(parsed)
+      : Number(formatSplitValue(settings));
+
+    updateSplitValue(String(splitValue));
+  }
 
   async function scanForHeartRateDevices() {
     setScanError(null);
@@ -219,8 +250,15 @@ export default function SettingsScreen() {
             Keep the ride screen focused and tune everything else here.
           </Text>
         </View>
-        <Link dismissTo href="/" style={styles.headerLink}>
-          Back to ride
+        <Link dismissTo href="/" asChild>
+          <Pressable
+            style={({ pressed }) => [
+              styles.backToRideButton,
+              pressed && styles.subtleButtonPressed,
+            ]}
+          >
+            <Text style={styles.backToRideButtonText}>Back to ride</Text>
+          </Pressable>
         </Link>
       </View>
       {isLoading ? (
@@ -244,7 +282,16 @@ export default function SettingsScreen() {
         <View style={styles.statusDivider} />
         <View style={styles.statusItem}>
           <Text style={styles.statusLabel}>Map</Text>
-          <Text style={styles.statusValue}>{settings.mapType}</Text>
+          <Text style={styles.statusValue}>
+            {getMapTypeLabel(settings.mapType)}
+          </Text>
+        </View>
+        <View style={styles.statusDivider} />
+        <View style={styles.statusItem}>
+          <Text style={styles.statusLabel}>Route</Text>
+          <Text style={styles.statusValue}>
+            {getRouteProfileLabel(settings.routeProfile)}
+          </Text>
         </View>
       </View>
 
@@ -396,6 +443,18 @@ export default function SettingsScreen() {
         </View>
         <View style={styles.switchRow}>
           <View style={styles.switchCopy}>
+            <Text style={styles.label}>Auto-dim screen</Text>
+            <Text style={styles.muted}>
+              Dim after idle time while recording; tap anywhere to brighten.
+            </Text>
+          </View>
+          <Switch
+            value={settings.autoDimScreen}
+            onValueChange={(value) => update('autoDimScreen', value)}
+          />
+        </View>
+        <View style={styles.switchRow}>
+          <View style={styles.switchCopy}>
             <Text style={styles.label}>Auto-pause</Text>
             <Text style={styles.muted}>
               Ignore stopped GPS points while recording.
@@ -434,18 +493,43 @@ export default function SettingsScreen() {
                 : 'No device connected. Enable Broadcast Heart Rate on your Garmin watch first.'}
             </Text>
           </View>
-          <Pressable style={styles.deviceButton} onPress={openDeviceModal}>
-            <Text style={styles.deviceButtonText}>Add device</Text>
+          <Pressable
+            style={({ pressed }) => [
+              styles.deviceButton,
+              pressed && styles.accentButtonPressed,
+            ]}
+            onPress={openDeviceModal}
+          >
+            {({ pressed }) => (
+              <Text
+                style={[
+                  styles.deviceButtonText,
+                  pressed && styles.accentButtonTextPressed,
+                ]}
+              >
+                Add device
+              </Text>
+            )}
           </Pressable>
         </View>
         {settings.connectedHeartRateDevice ? (
           <Pressable
-            style={styles.clearDeviceButton}
+            style={({ pressed }) => [
+              styles.clearDeviceButton,
+              pressed && styles.dangerButtonPressed,
+            ]}
             onPress={() => update('connectedHeartRateDevice', null)}
           >
-            <Text style={styles.clearDeviceButtonText}>
-              Remove heart rate device
-            </Text>
+            {({ pressed }) => (
+              <Text
+                style={[
+                  styles.clearDeviceButtonText,
+                  pressed && styles.dangerButtonTextPressed,
+                ]}
+              >
+                Remove heart rate device
+              </Text>
+            )}
           </Pressable>
         ) : null}
       </Section>
@@ -513,46 +597,47 @@ export default function SettingsScreen() {
             onSelect={(value) => update('splitType', value)}
           />
         </View>
-        <View style={styles.rowWrap}>
-          {(settings.splitType === 'distance'
-            ? distancePresets
-            : timePresets
-          ).map((preset) => (
-            <ValueButton
-              key={preset.label}
-              styles={styles}
-              label={preset.label}
-              selected={
-                settings.splitType === 'distance'
-                  ? settings.splitDistanceMeters === preset.value
-                  : settings.splitDurationSeconds === preset.value
-              }
-              onPress={() =>
-                update(
-                  settings.splitType === 'distance'
-                    ? 'splitDistanceMeters'
-                    : 'splitDurationSeconds',
-                  preset.value,
-                )
-              }
-            />
-          ))}
+        <View style={styles.splitValueField}>
+          <Text style={styles.label}>
+            {settings.splitType === 'distance'
+              ? `Auto-lap every (${settings.unitSystem === 'imperial' ? 'mi' : 'km'})`
+              : 'Auto-lap every (min)'}
+          </Text>
+          <TextInput
+            key={`${settings.splitType}-${settings.unitSystem}`}
+            defaultValue={formatSplitValue(settings)}
+            keyboardType="number-pad"
+            maxLength={3}
+            placeholder="10"
+            placeholderTextColor={colors.mutedText}
+            style={styles.input}
+            onEndEditing={(event) => commitSplitValue(event.nativeEvent.text)}
+            onChangeText={updateSplitValue}
+          />
         </View>
         <Text style={styles.muted}>
-          Defaults: 1 mi / 1 km equivalent or 10 minutes.
+          Enter any whole number from 1 to 100.
         </Text>
       </Section>
 
       <Section
         title="Map Display"
-        subtitle="Pick the base map used while riding."
+        subtitle="Pick the base map and routing profile used while riding."
         styles={styles}
       >
+        <Text style={styles.label}>Map type</Text>
         <View style={styles.rowWrap}>
           <OptionButton
             styles={styles}
             label="Map"
             value="standard"
+            selectedValue={settings.mapType}
+            onSelect={(value) => update('mapType', value)}
+          />
+          <OptionButton
+            styles={styles}
+            label="Outdoor"
+            value="outdoor"
             selectedValue={settings.mapType}
             onSelect={(value) => update('mapType', value)}
           />
@@ -571,6 +656,31 @@ export default function SettingsScreen() {
             onSelect={(value) => update('mapType', value)}
           />
         </View>
+        <View style={styles.divider} />
+        <Text style={styles.label}>Route profile</Text>
+        <View style={styles.rowWrap}>
+          <OptionButton
+            styles={styles}
+            label="Bike"
+            value="bike"
+            selectedValue={settings.routeProfile}
+            onSelect={(value) => update('routeProfile', value)}
+          />
+          <OptionButton
+            styles={styles}
+            label="Roadbike"
+            value="roadbike"
+            selectedValue={settings.routeProfile}
+            onSelect={(value) => update('routeProfile', value)}
+          />
+          <OptionButton
+            styles={styles}
+            label="MTB"
+            value="mtb"
+            selectedValue={settings.routeProfile}
+            onSelect={(value) => update('routeProfile', value)}
+          />
+        </View>
       </Section>
 
       <Modal
@@ -584,7 +694,10 @@ export default function SettingsScreen() {
         >
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Add Heart Rate Device</Text>
-            <Pressable onPress={() => setIsDeviceModalOpen(false)}>
+            <Pressable
+              style={({ pressed }) => pressed && styles.linkButtonPressed}
+              onPress={() => setIsDeviceModalOpen(false)}
+            >
               <Text style={styles.modalClose}>Close</Text>
             </Pressable>
           </View>
@@ -594,18 +707,32 @@ export default function SettingsScreen() {
           </Text>
           <Pressable
             disabled={isScanning}
-            style={[styles.deviceButton, isScanning && styles.disabledButton]}
+            style={({ pressed }) => [
+              styles.deviceButton,
+              pressed && !isScanning && styles.accentButtonPressed,
+              isScanning && styles.disabledButton,
+            ]}
             onPress={scanForHeartRateDevices}
           >
-            <Text style={styles.deviceButtonText}>
-              {isScanning ? 'Scanning...' : 'Scan again'}
-            </Text>
+            {({ pressed }) => (
+              <Text
+                style={[
+                  styles.deviceButtonText,
+                  pressed && !isScanning && styles.accentButtonTextPressed,
+                ]}
+              >
+                {isScanning ? 'Scanning...' : 'Scan again'}
+              </Text>
+            )}
           </Pressable>
           {scanError ? <Text style={styles.error}>{scanError}</Text> : null}
           {heartRateDevices.map((device) => (
             <Pressable
               key={device.id}
-              style={styles.deviceRow}
+              style={({ pressed }) => [
+                styles.deviceRow,
+                pressed && styles.listButtonPressed,
+              ]}
               onPress={() => {
                 update('connectedHeartRateDevice', device);
                 setIsDeviceModalOpen(false);
@@ -669,11 +796,17 @@ function createStyles(colors: ThemeColors) {
       fontSize: 15,
       lineHeight: 21,
     },
-    headerLink: {
+    backToRideButton: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    backToRideButtonText: {
       color: colors.accent,
-      fontSize: 17,
+      fontSize: 13,
       fontWeight: '900',
-      paddingTop: 4,
     },
     statusCard: {
       flexDirection: 'row',
@@ -762,6 +895,10 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       gap: 6,
     },
+    splitValueField: {
+      gap: 6,
+      marginTop: 12,
+    },
     input: {
       borderWidth: 1,
       borderColor: colors.border,
@@ -795,6 +932,29 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.accent,
       backgroundColor: colors.accent,
     },
+    optionButtonPressed: {
+      borderColor: colors.accent,
+      backgroundColor: colors.accentSoft,
+      transform: [{ scale: 0.97 }],
+    },
+    selectedButtonPressed: {
+      opacity: 0.82,
+      transform: [{ scale: 0.97 }],
+    },
+    subtleButtonPressed: {
+      borderColor: colors.accent,
+      backgroundColor: colors.accentSoft,
+      opacity: 0.82,
+      transform: [{ scale: 0.98 }],
+    },
+    listButtonPressed: {
+      borderColor: colors.accent,
+      backgroundColor: colors.accentSoft,
+      transform: [{ scale: 0.99 }],
+    },
+    linkButtonPressed: {
+      opacity: 0.6,
+    },
     optionButtonText: {
       color: colors.secondaryText,
       fontWeight: '800',
@@ -815,6 +975,14 @@ function createStyles(colors: ThemeColors) {
       color: colors.accent,
       fontWeight: '900',
     },
+    accentButtonPressed: {
+      borderColor: colors.accent,
+      backgroundColor: colors.accent,
+      transform: [{ scale: 0.97 }],
+    },
+    accentButtonTextPressed: {
+      color: '#fff',
+    },
     clearDeviceButton: {
       alignItems: 'center',
       borderWidth: 1,
@@ -827,6 +995,14 @@ function createStyles(colors: ThemeColors) {
     clearDeviceButtonText: {
       color: colors.danger,
       fontWeight: '900',
+    },
+    dangerButtonPressed: {
+      borderColor: colors.danger,
+      backgroundColor: colors.danger,
+      transform: [{ scale: 0.97 }],
+    },
+    dangerButtonTextPressed: {
+      color: '#fff',
     },
     disabledButton: {
       opacity: 0.55,

@@ -16,9 +16,11 @@ export function RideMap({
 }: {
   destinationOptions?: DestinationOption[];
   isNavigating?: boolean;
+  onCancelNavigation?: () => void;
   points: RidePoint[];
   mapType?: RideSettings['mapType'];
   plannedRoute?: PlannedRoute | null;
+  unitSystem?: RideSettings['unitSystem'];
 }) {
   const colors = useThemeColors();
   const styles = createStyles(colors);

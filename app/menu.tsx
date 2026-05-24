@@ -37,8 +37,15 @@ export default function MenuScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <Text style={styles.menuLabel}>Menu</Text>
-        <Link dismissTo href="/" style={styles.closeLink}>
-          Close
+        <Link dismissTo href="/" asChild>
+          <Pressable
+            style={({ pressed }) => [
+              styles.closeLink,
+              pressed && styles.closeLinkPressed,
+            ]}
+          >
+            <Text style={styles.closeLinkText}>Close</Text>
+          </Pressable>
         </Link>
       </View>
 
@@ -90,10 +97,19 @@ function createStyles(colors: ThemeColors, topInset: number) {
       letterSpacing: -0.2,
     },
     closeLink: {
+      borderRadius: 999,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+    },
+    closeLinkPressed: {
+      backgroundColor: colors.accentSoft,
+      opacity: 0.82,
+      transform: [{ scale: 0.96 }],
+    },
+    closeLinkText: {
       color: colors.accent,
       fontSize: 16,
       fontWeight: '800',
-      paddingTop: 3,
     },
     menuList: {
       gap: 12,

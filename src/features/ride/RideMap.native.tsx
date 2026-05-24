@@ -1,53 +1,67 @@
-import { useEffect, useRef, useState } from 'react';
-import Constants from 'expo-constants';
-import * as Location from 'expo-location';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import MapView, {
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Camera,
+  type CameraRef,
+  GeoJSONSource,
+  Layer,
+  Map,
+  type ViewStateChangeEvent,
   Marker,
-  PROVIDER_GOOGLE,
-  Polyline,
-  type LatLng,
-  type MapType,
-} from 'react-native-maps';
+  UserLocation,
+  type LngLat,
+  type LngLatBounds,
+} from '@maplibre/maplibre-react-native';
+import * as Location from 'expo-location';
+import {
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type NativeSyntheticEvent,
+} from 'react-native';
+import type { FeatureCollection, LineString } from 'geojson';
 
 import {
   type ThemeColors,
   useResolvedTheme,
   useThemeColors,
 } from '../settings/settings';
+import { getRideMapStyle, getRideMapStyleKey } from './mapStyles';
 import type {
   DestinationOption,
   PlannedRoute,
   PlannedRouteStep,
   RidePoint,
   RideSettings,
+  RouteCoordinate,
 } from './types';
-
-function toCoordinate(point: { latitude: number; longitude: number }): LatLng {
-  return {
-    latitude: point.latitude,
-    longitude: point.longitude,
-  };
-}
-
-function getMapType(mapType: RideSettings['mapType']): MapType {
-  if (mapType === 'satellite') {
-    return 'satellite';
-  }
-
-  if (mapType === 'hybrid') {
-    return 'hybrid';
-  }
-
-  return 'standard';
-}
 
 const DEFAULT_COORDINATE = {
   latitude: 37.78825,
   longitude: -122.4324,
 };
 
+const EMPTY_LINE: FeatureCollection<LineString> = {
+  type: 'FeatureCollection',
+  features: [],
+};
+
 const MANEUVER_COMPLETE_DISTANCE_METERS = 35;
+const SEARCH_RESULTS_FIT_RADIUS_METERS = 5000;
+const NAVIGATION_CAMERA_PADDING = { top: 118, right: 0, bottom: 0, left: 0 };
+const COMPASS_NEEDLE_ICON = require('../../../assets/compass-needle.png');
+
+function toCoordinate(point: { latitude: number; longitude: number }) {
+  return {
+    latitude: point.latitude,
+    longitude: point.longitude,
+  };
+}
+
+function toLngLat(point: RouteCoordinate): LngLat {
+  return [point.longitude, point.latitude];
+}
 
 function getHeading(points: RidePoint[]) {
   const lastPoint = points[points.length - 1];
@@ -59,7 +73,7 @@ function getHeading(points: RidePoint[]) {
   return 0;
 }
 
-function distanceBetweenCoordinates(a: LatLng, b: LatLng) {
+function distanceBetweenCoordinates(a: RouteCoordinate, b: RouteCoordinate) {
   const earthRadiusMeters = 6_371_000;
   const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
   const deltaLatitude = toRadians(b.latitude - a.latitude);
@@ -79,13 +93,30 @@ function distanceBetweenCoordinates(a: LatLng, b: LatLng) {
   );
 }
 
-function formatNavigationDistance(meters: number | null) {
+function formatNavigationDistance(
+  meters: number | null,
+  unitSystem: RideSettings['unitSystem'],
+) {
   if (meters == null) {
     return '';
   }
 
+  if (unitSystem === 'imperial') {
+    const feet = meters * 3.280839895;
+
+    if (feet >= 5280) {
+      return `${(feet / 5280).toFixed(1)} mi`;
+    }
+
+    if (feet >= 100) {
+      return `${Math.round(feet / 10) * 10} ft`;
+    }
+
+    return `${Math.max(10, Math.round(feet / 5) * 5)} ft`;
+  }
+
   if (meters >= 1609.344) {
-    return `${(meters / 1609.344).toFixed(1)} mi`;
+    return `${(meters / 1000).toFixed(1)} km`;
   }
 
   if (meters >= 100) {
@@ -95,11 +126,72 @@ function formatNavigationDistance(meters: number | null) {
   return `${Math.max(5, Math.round(meters / 5) * 5)} m`;
 }
 
+function getNavigationGlyph(instruction: string) {
+  const normalized = instruction.toLowerCase();
+
+  if (normalized.includes('arrive') || normalized.includes('destination')) {
+    return '◎';
+  }
+
+  if (normalized.includes('u-turn')) {
+    return '↶';
+  }
+
+  if (normalized.includes('sharp left')) {
+    return '↰';
+  }
+
+  if (normalized.includes('sharp right')) {
+    return '↱';
+  }
+
+  if (normalized.includes('left')) {
+    return '↰';
+  }
+
+  if (normalized.includes('right')) {
+    return '↱';
+  }
+
+  if (normalized.includes('roundabout')) {
+    return '↻';
+  }
+
+  return '↑';
+}
+
+function getInstructionStreetName(step: PlannedRouteStep) {
+  if (step.streetName === '-') {
+    return step.instruction;
+  }
+
+  if (step.streetName) {
+    return step.streetName;
+  }
+
+  const match = step.instruction.match(
+    /(?:onto|on|toward|continue on|turn (?:left|right) onto|head (?:north|south|east|west)?\s*(?:on|onto))\s+(.+)$/i,
+  );
+  const streetName = match?.[1]
+    ?.replace(/\s+and continue.*$/i, '')
+    .replace(/\s+for\s+.+$/i, '')
+    .trim();
+
+  if (streetName && streetName !== '-') {
+    return streetName;
+  }
+
+  return step.instruction;
+}
+
 function getStepEndCoordinate(step: PlannedRouteStep) {
   return step.coordinates.at(-1) ?? null;
 }
 
-function getClosestRouteIndex(coordinate: LatLng, routeCoordinates: LatLng[]) {
+function getClosestRouteIndex(
+  coordinate: RouteCoordinate,
+  routeCoordinates: RouteCoordinate[],
+) {
   return routeCoordinates.reduce(
     (best, candidate, index) => {
       const distanceMeters = distanceBetweenCoordinates(coordinate, candidate);
@@ -113,7 +205,7 @@ function getClosestRouteIndex(coordinate: LatLng, routeCoordinates: LatLng[]) {
 }
 
 function getStepEndIndexes(
-  routeCoordinates: LatLng[],
+  routeCoordinates: RouteCoordinate[],
   steps: PlannedRouteStep[],
 ) {
   return steps.map((step) => {
@@ -125,32 +217,89 @@ function getStepEndIndexes(
   });
 }
 
+function getBounds(coordinates: RouteCoordinate[]): LngLatBounds | null {
+  if (coordinates.length === 0) {
+    return null;
+  }
+
+  const latitudes = coordinates.map((coordinate) => coordinate.latitude);
+  const longitudes = coordinates.map((coordinate) => coordinate.longitude);
+
+  return [
+    Math.min(...longitudes),
+    Math.min(...latitudes),
+    Math.max(...longitudes),
+    Math.max(...latitudes),
+  ];
+}
+
+function getSearchResultFitCoordinates(coordinates: RouteCoordinate[]) {
+  const anchor = coordinates[0];
+
+  if (!anchor) {
+    return [];
+  }
+
+  return coordinates.filter(
+    (coordinate) =>
+      distanceBetweenCoordinates(anchor, coordinate) <=
+      SEARCH_RESULTS_FIT_RADIUS_METERS,
+  );
+}
+
+function lineFeature(
+  id: string,
+  coordinates: RouteCoordinate[],
+): FeatureCollection<LineString> {
+  if (coordinates.length < 2) {
+    return EMPTY_LINE;
+  }
+
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        id,
+        properties: {},
+        geometry: {
+          type: 'LineString',
+          coordinates: coordinates.map(toLngLat),
+        },
+      },
+    ],
+  };
+}
+
 export function RideMap({
   destinationOptions = [],
   isNavigating = false,
+  onCancelNavigation,
   points,
   mapType,
   plannedRoute,
+  unitSystem,
 }: {
   destinationOptions?: DestinationOption[];
   isNavigating?: boolean;
+  onCancelNavigation?: () => void;
   points: RidePoint[];
   mapType: RideSettings['mapType'];
   plannedRoute?: PlannedRoute | null;
+  unitSystem: RideSettings['unitSystem'];
 }) {
-  const mapRef = useRef<MapView | null>(null);
+  const cameraRef = useRef<CameraRef | null>(null);
+  const fittedDestinationKeyRef = useRef<string | null>(null);
+  const isProgrammaticCameraMoveRef = useRef(false);
   const colors = useThemeColors();
   const resolvedTheme = useResolvedTheme();
   const styles = createStyles(colors);
-  const isDarkTheme = resolvedTheme === 'dark';
-  const [currentCoordinate, setCurrentCoordinate] = useState<LatLng | null>(
+  const [loadedMapStyle, setLoadedMapStyle] = useState<string | null>(null);
+  const [isCameraCentered, setIsCameraCentered] = useState(true);
+  const [isTopDownView, setIsTopDownView] = useState(false);
+  const [currentCoordinate, setCurrentCoordinate] = useState<RouteCoordinate | null>(
     null,
   );
-  const hasGoogleMapsApiKey = Boolean(
-    Constants.expoConfig?.extra?.hasGoogleMapsApiKey,
-  );
-  const isExpoGo = Constants.appOwnership === 'expo';
-  const needsGoogleMapsKey = Platform.OS === 'android';
   const coordinates = points.map(toCoordinate);
   const plannedCoordinates = plannedRoute?.coordinates;
   const plannedStepEndIndexes = plannedRoute?.steps.length
@@ -159,6 +308,12 @@ export function RideMap({
   const destinationCoordinates = destinationOptions.map(
     (option) => option.coordinate,
   );
+  const destinationFitKey = destinationOptions
+    .map(
+      (option) =>
+        `${option.id}:${option.coordinate.latitude},${option.coordinate.longitude}`,
+    )
+    .join('|');
   const lastPoint = points[points.length - 1];
   const lastLatitude = lastPoint?.latitude;
   const lastLongitude = lastPoint?.longitude;
@@ -168,6 +323,23 @@ export function RideMap({
       : null;
   const mapCenter = lastCoordinate ?? currentCoordinate ?? DEFAULT_COORDINATE;
   const mapHeading = getHeading(points);
+  const mapStyle = useMemo(
+    () => getRideMapStyle(mapType, resolvedTheme),
+    [mapType, resolvedTheme],
+  );
+  const mapStyleKey = useMemo(
+    () => getRideMapStyleKey(mapType, resolvedTheme),
+    [mapType, resolvedTheme],
+  );
+  const isStyleLoaded = loadedMapStyle === mapStyleKey;
+  const recordedRouteFeature = useMemo(
+    () => lineFeature('recorded-route', coordinates),
+    [coordinates],
+  );
+  const plannedRouteFeature = useMemo(
+    () => lineFeature('planned-route', plannedCoordinates ?? []),
+    [plannedCoordinates],
+  );
   const activeNavigationStep =
     isNavigating && plannedRoute && lastCoordinate && plannedCoordinates?.length
       ? getActiveNavigationStep(
@@ -211,20 +383,41 @@ export function RideMap({
   }, []);
 
   useEffect(() => {
-    if (lastLatitude === undefined || lastLongitude === undefined) {
+    if (
+      !isCameraCentered ||
+      !isStyleLoaded ||
+      lastLatitude === undefined ||
+      lastLongitude === undefined
+    ) {
       return;
     }
 
-    mapRef.current?.animateCamera({
-      center: { latitude: lastLatitude, longitude: lastLongitude },
-      heading: mapHeading,
-      pitch: isNavigating ? 60 : 45,
+    isProgrammaticCameraMoveRef.current = true;
+    cameraRef.current?.setStop({
+      center: [lastLongitude, lastLatitude],
+      bearing: isTopDownView ? 0 : mapHeading,
+      pitch: isTopDownView ? 0 : isNavigating ? 60 : 45,
+      padding: isNavigating ? NAVIGATION_CAMERA_PADDING : undefined,
       zoom: isNavigating ? 18 : 17,
+      duration: 500,
+      easing: 'ease',
     });
-  }, [isNavigating, lastLatitude, lastLongitude, mapHeading]);
+    setTimeout(() => {
+      isProgrammaticCameraMoveRef.current = false;
+    }, 550);
+  }, [
+    isCameraCentered,
+    isNavigating,
+    isStyleLoaded,
+    isTopDownView,
+    lastLatitude,
+    lastLongitude,
+    mapHeading,
+  ]);
 
   useEffect(() => {
     if (
+      !isStyleLoaded ||
       lastLatitude !== undefined ||
       lastLongitude !== undefined ||
       !currentCoordinate
@@ -232,15 +425,17 @@ export function RideMap({
       return;
     }
 
-    mapRef.current?.animateCamera({
-      center: currentCoordinate,
+    cameraRef.current?.easeTo({
+      center: toLngLat(currentCoordinate),
       pitch: 0,
       zoom: 15,
+      duration: 500,
     });
-  }, [currentCoordinate, lastLatitude, lastLongitude]);
+  }, [currentCoordinate, isStyleLoaded, lastLatitude, lastLongitude]);
 
   useEffect(() => {
     if (
+      !isStyleLoaded ||
       coordinates.length > 1 ||
       !plannedCoordinates ||
       plannedCoordinates.length < 2
@@ -248,43 +443,94 @@ export function RideMap({
       return;
     }
 
-    mapRef.current?.fitToCoordinates(plannedCoordinates, {
-      animated: true,
-      edgePadding: { top: 64, right: 48, bottom: 64, left: 48 },
-    });
-  }, [coordinates.length, plannedCoordinates]);
+    const bounds = getBounds(plannedCoordinates);
+
+    if (bounds) {
+      cameraRef.current?.fitBounds(bounds, {
+        padding: { top: 64, right: 48, bottom: 64, left: 48 },
+        duration: 500,
+      });
+    }
+  }, [coordinates.length, isStyleLoaded, plannedCoordinates]);
 
   useEffect(() => {
+    if (destinationCoordinates.length === 0 || plannedCoordinates) {
+      fittedDestinationKeyRef.current = null;
+      return;
+    }
+
     if (
+      !isStyleLoaded ||
       coordinates.length > 1 ||
-      plannedCoordinates ||
-      destinationCoordinates.length === 0
+      fittedDestinationKeyRef.current === destinationFitKey
     ) {
       return;
     }
 
-    if (destinationCoordinates.length === 1) {
-      mapRef.current?.animateCamera({
-        center: destinationCoordinates[0],
+    fittedDestinationKeyRef.current = destinationFitKey;
+
+    const fitCoordinates = getSearchResultFitCoordinates(destinationCoordinates);
+
+    if (fitCoordinates.length < 2) {
+      cameraRef.current?.easeTo({
+        center: toLngLat(destinationCoordinates[0]),
         pitch: 0,
-        zoom: 15,
+        zoom: 17,
+        duration: 500,
       });
       return;
     }
 
-    mapRef.current?.fitToCoordinates(destinationCoordinates, {
-      animated: true,
-      edgePadding: { top: 72, right: 48, bottom: 300, left: 48 },
-    });
-  }, [coordinates.length, destinationCoordinates, plannedCoordinates]);
+    const bounds = getBounds(fitCoordinates);
 
-  function recenterMap() {
-    mapRef.current?.animateCamera({
-      center: mapCenter,
-      heading: mapHeading,
-      pitch: lastCoordinate ? 45 : 0,
+    if (bounds) {
+      cameraRef.current?.fitBounds(bounds, {
+        padding: { top: 12, right: 12, bottom: 12, left: 12 },
+        duration: 500,
+      });
+    }
+  }, [
+    coordinates.length,
+    destinationCoordinates,
+    destinationFitKey,
+    isStyleLoaded,
+    plannedCoordinates,
+  ]);
+
+  function setMapCameraCentered(topDownView = isTopDownView) {
+    isProgrammaticCameraMoveRef.current = true;
+    cameraRef.current?.setStop({
+      center: toLngLat(mapCenter),
+      bearing: topDownView ? 0 : mapHeading,
+      pitch: topDownView ? 0 : lastCoordinate ? (isNavigating ? 60 : 45) : 0,
+      padding: isNavigating ? NAVIGATION_CAMERA_PADDING : undefined,
       zoom: lastCoordinate ? 17 : 15,
+      duration: 500,
+      easing: 'ease',
     });
+    setIsCameraCentered(true);
+    setTimeout(() => {
+      isProgrammaticCameraMoveRef.current = false;
+    }, 550);
+  }
+
+  function handleMapCenterAction() {
+    if (!isCameraCentered) {
+      setMapCameraCentered();
+      return;
+    }
+
+    const nextTopDownView = !isTopDownView;
+    setIsTopDownView(nextTopDownView);
+    setMapCameraCentered(nextTopDownView);
+  }
+
+  function handleRegionWillChange(
+    event: NativeSyntheticEvent<ViewStateChangeEvent>,
+  ) {
+    if (event.nativeEvent.userInteraction && !isProgrammaticCameraMoveRef.current) {
+      setIsCameraCentered(false);
+    }
   }
 
   function showWholeRoute() {
@@ -292,19 +538,26 @@ export function RideMap({
       coordinates.length > 1 ? coordinates : (plannedCoordinates ?? []);
 
     if (routeCoordinates.length < 2) {
-      recenterMap();
+      setMapCameraCentered();
       return;
     }
 
-    mapRef.current?.fitToCoordinates(routeCoordinates, {
-      animated: true,
-      edgePadding: { top: 48, right: 48, bottom: 48, left: 48 },
-    });
+    const bounds = getBounds(routeCoordinates);
+
+    if (bounds) {
+      cameraRef.current?.fitBounds(bounds, {
+        padding: isNavigating
+          ? { top: 140, right: 48, bottom: 48, left: 48 }
+          : { top: 48, right: 48, bottom: 48, left: 48 },
+        duration: 500,
+      });
+      setIsCameraCentered(false);
+    }
   }
 
   function getActiveNavigationStep(
-    coordinate: LatLng,
-    routeCoordinates: LatLng[],
+    coordinate: RouteCoordinate,
+    routeCoordinates: RouteCoordinate[],
     steps: PlannedRouteStep[],
     stepEndIndexes: number[],
   ) {
@@ -337,62 +590,47 @@ export function RideMap({
 
     return {
       instruction: displayStep.instruction,
+      glyph: getNavigationGlyph(displayStep.instruction),
+      streetName: getInstructionStreetName(displayStep),
       distanceText: formatNavigationDistance(
         displayEndCoordinate
           ? distanceBetweenCoordinates(coordinate, displayEndCoordinate)
           : displayStep.distanceMeters,
+        unitSystem,
       ),
     };
   }
 
-  if (needsGoogleMapsKey && (!hasGoogleMapsApiKey || isExpoGo)) {
-    return (
-      <View style={styles.fallbackContainer}>
-        <Text style={styles.fallbackTitle}>Google Maps needs a dev build</Text>
-        <Text style={styles.fallbackCopy}>
-          Android maps require `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` to be embedded
-          in the native app. Expo Go cannot apply that native config, so create
-          a development build after setting `.env`. Route recording still works;{' '}
-          {points.length} points collected.
-        </Text>
-        <Text style={styles.fallbackCopy}>
-          If a dev build still shows a blank map with the Google logo, enable
-          Maps SDK for Android and add package `com.josh.pelot` plus this debug
-          SHA-1 in Google Cloud Console.
-        </Text>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.container}>
-      <MapView
-        key={resolvedTheme}
-        ref={mapRef}
+      <Map
+        key={mapStyleKey}
+        androidView="texture"
         style={styles.map}
-        provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
-        mapType={getMapType(mapType)}
-        userInterfaceStyle={resolvedTheme}
-        showsUserLocation
-        followsUserLocation={false}
-        showsCompass
-        showsMyLocationButton={false}
-        showsPointsOfInterests={false}
-        toolbarEnabled={false}
-        initialRegion={{
-          latitude: mapCenter.latitude,
-          longitude: mapCenter.longitude,
-          latitudeDelta: 0.004,
-          longitudeDelta: 0.004,
-        }}
+        mapStyle={mapStyle}
+        attribution={false}
+        compass
+        logo={false}
+        onRegionWillChange={handleRegionWillChange}
+        onDidFinishLoadingStyle={() => setLoadedMapStyle(mapStyleKey)}
       >
+        <Camera
+          ref={cameraRef}
+          initialViewState={{
+            center: toLngLat(mapCenter),
+            pitch: lastCoordinate ? 45 : 0,
+            padding: isNavigating ? NAVIGATION_CAMERA_PADDING : undefined,
+            zoom: lastCoordinate ? 17 : 15,
+          }}
+        />
+        <UserLocation accuracy animated heading />
         {!plannedRoute
           ? destinationOptions.map((option, index) => (
               <Marker
                 key={option.id}
-                coordinate={option.coordinate}
-                description={option.address ?? undefined}
-                title={`${index + 1}. ${option.name}`}
+                id={option.id}
+                anchor="center"
+                lngLat={toLngLat(option.coordinate)}
               >
                 <View style={styles.destinationMarker}>
                   <Text style={styles.destinationMarkerText}>{index + 1}</Text>
@@ -400,55 +638,66 @@ export function RideMap({
               </Marker>
             ))
           : null}
-        {plannedCoordinates && plannedCoordinates.length > 1 ? (
-          <Polyline
-            coordinates={plannedCoordinates}
-            strokeColor="#1f6feb"
-            strokeWidth={8}
-            lineCap="round"
-            lineJoin="round"
+        <GeoJSONSource id="planned-route-source" data={plannedRouteFeature}>
+          <Layer
+            id="planned-route-outer"
+            type="line"
+            paint={{
+              'line-color': '#1f6feb',
+              'line-width': 8,
+            }}
+            layout={{
+              'line-cap': 'round',
+              'line-join': 'round',
+            }}
           />
-        ) : null}
-        {plannedCoordinates && plannedCoordinates.length > 1 ? (
-          <Polyline
-            coordinates={plannedCoordinates}
-            strokeColor="#ffffff"
-            strokeWidth={3}
-            lineCap="round"
-            lineJoin="round"
+          <Layer
+            id="planned-route-inner"
+            type="line"
+            paint={{
+              'line-color': '#ffffff',
+              'line-width': 3,
+            }}
+            layout={{
+              'line-cap': 'round',
+              'line-join': 'round',
+            }}
           />
-        ) : null}
-        {coordinates.length > 1 ? (
-          <Polyline
-            coordinates={coordinates}
-            strokeColor="#2ea043"
-            strokeWidth={7}
-            lineCap="round"
-            lineJoin="round"
+        </GeoJSONSource>
+        <GeoJSONSource id="recorded-route-source" data={recordedRouteFeature}>
+          <Layer
+            id="recorded-route"
+            type="line"
+            paint={{
+              'line-color': '#2ea043',
+              'line-width': 7,
+            }}
+            layout={{
+              'line-cap': 'round',
+              'line-join': 'round',
+            }}
           />
-        ) : null}
-      </MapView>
+        </GeoJSONSource>
+      </Map>
       {activeNavigationStep ? (
         <View style={styles.mapHud} pointerEvents="box-none">
-          <View
-            style={[
-              styles.navigationBanner,
-              !isDarkTheme && styles.navigationBannerLight,
-            ]}
-          >
-            {activeNavigationStep.distanceText ? (
-              <Text style={styles.navigationDistance}>
-                {activeNavigationStep.distanceText}
+          <View style={styles.navigationBanner}>
+            <Text style={styles.navigationGlyph}>{activeNavigationStep.glyph}</Text>
+            <View style={styles.navigationCopy}>
+              {activeNavigationStep.distanceText ? (
+                <Text style={styles.navigationDistance}>
+                  {activeNavigationStep.distanceText}
+                </Text>
+              ) : null}
+              <Text
+                adjustsFontSizeToFit
+                minimumFontScale={0.35}
+                numberOfLines={1}
+                style={styles.navigationStreet}
+              >
+                {activeNavigationStep.streetName}
               </Text>
-            ) : null}
-            <Text
-              style={[
-                styles.navigationInstruction,
-                !isDarkTheme && styles.navigationInstructionLight,
-              ]}
-            >
-              {activeNavigationStep.instruction}
-            </Text>
+            </View>
           </View>
         </View>
       ) : null}
@@ -460,9 +709,16 @@ export function RideMap({
             styles.mapActionButton,
             pressed && styles.mapActionButtonPressed,
           ]}
-          onPress={recenterMap}
+          onPress={handleMapCenterAction}
         >
-          <Text style={styles.mapActionIcon}>⌖</Text>
+          {isCameraCentered ? (
+            <Image
+              source={COMPASS_NEEDLE_ICON}
+              style={styles.mapActionImageIcon}
+            />
+          ) : (
+            <Text style={styles.mapActionIcon}>⌖</Text>
+          )}
         </Pressable>
         <Pressable
           accessibilityLabel="Show whole route"
@@ -473,8 +729,22 @@ export function RideMap({
           ]}
           onPress={showWholeRoute}
         >
-          <Text style={styles.mapActionIcon}>↝</Text>
+          <Text style={styles.mapActionIcon}>⛶</Text>
         </Pressable>
+        {isNavigating && onCancelNavigation ? (
+          <Pressable
+            accessibilityLabel="Cancel navigation"
+            hitSlop={8}
+            style={({ pressed }) => [
+              styles.mapActionButton,
+              styles.mapActionButtonDanger,
+              pressed && styles.mapActionButtonPressed,
+            ]}
+            onPress={onCancelNavigation}
+          >
+            <Text style={styles.mapActionIconDanger}>×</Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -492,42 +762,49 @@ function createStyles(colors: ThemeColors) {
     },
     mapHud: {
       position: 'absolute',
-      top: 14,
-      right: 14,
-      left: 14,
+      top: 8,
+      left: 8,
+      right: 8,
     },
     navigationBanner: {
-      flex: 1,
-      maxWidth: '76%',
-      borderRadius: 18,
-      backgroundColor: colors.inverseBackground,
+      minHeight: 92,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      borderRadius: 28,
+      backgroundColor: '#006d66',
       paddingHorizontal: 14,
-      paddingVertical: 12,
-    },
-    navigationBannerLight: {
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: 'rgba(255, 255, 255, 0.96)',
+      paddingVertical: 16,
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 5 },
-      shadowOpacity: 0.12,
-      shadowRadius: 10,
-      elevation: 6,
+      shadowOpacity: 0.24,
+      shadowRadius: 14,
+      elevation: 8,
+    },
+    navigationGlyph: {
+      minWidth: 66,
+      color: '#ffffff',
+      fontSize: 72,
+      fontWeight: '700',
+      lineHeight: 78,
+      textAlign: 'center',
+    },
+    navigationCopy: {
+      flex: 1,
+      minWidth: 0,
     },
     navigationDistance: {
-      color: colors.accent,
-      fontSize: 14,
-      fontWeight: '900',
+      color: '#ffffff',
+      fontSize: 30,
+      fontWeight: '400',
+      lineHeight: 36,
     },
-    navigationInstruction: {
-      marginTop: 2,
-      color: colors.inverseText,
-      fontSize: 17,
-      fontWeight: '900',
-      lineHeight: 22,
-    },
-    navigationInstructionLight: {
-      color: colors.primaryText,
+    navigationStreet: {
+      marginTop: 8,
+      color: '#ffffff',
+      fontSize: 36,
+      fontWeight: '800',
+      lineHeight: 40,
     },
     mapActions: {
       position: 'absolute',
@@ -554,11 +831,25 @@ function createStyles(colors: ThemeColors) {
       opacity: 0.72,
       transform: [{ scale: 0.96 }],
     },
+    mapActionButtonDanger: {
+      borderColor: colors.danger,
+      backgroundColor: colors.danger,
+    },
     mapActionIcon: {
       color: colors.primaryText,
       fontSize: 20,
       fontWeight: '900',
       lineHeight: 22,
+    },
+    mapActionImageIcon: {
+      width: 24,
+      height: 24,
+    },
+    mapActionIconDanger: {
+      color: '#fff',
+      fontSize: 24,
+      fontWeight: '900',
+      lineHeight: 26,
     },
     destinationMarker: {
       width: 34,
@@ -574,23 +865,6 @@ function createStyles(colors: ThemeColors) {
       color: '#fff',
       fontSize: 15,
       fontWeight: '900',
-    },
-    fallbackContainer: {
-      minHeight: 220,
-      justifyContent: 'center',
-      backgroundColor: colors.card,
-      padding: 20,
-    },
-    fallbackTitle: {
-      color: colors.primaryText,
-      fontSize: 22,
-      fontWeight: '900',
-    },
-    fallbackCopy: {
-      marginTop: 8,
-      color: colors.mutedText,
-      fontSize: 15,
-      lineHeight: 21,
     },
   });
 }

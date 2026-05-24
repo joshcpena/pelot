@@ -81,8 +81,15 @@ export default function PermissionsScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Permissions</Text>
-        <Link dismissTo href="/" style={styles.link}>
-          Back to ride
+        <Link dismissTo href="/" asChild>
+          <Pressable
+            style={({ pressed }) => [
+              styles.backToRideButton,
+              pressed && styles.subtleButtonPressed,
+            ]}
+          >
+            <Text style={styles.backToRideButtonText}>Back to ride</Text>
+          </Pressable>
         </Link>
       </View>
       <Text style={styles.copy}>
@@ -94,7 +101,13 @@ export default function PermissionsScreen() {
       <View style={styles.card}>
         <Text style={styles.label}>Foreground location</Text>
         <Text style={styles.value}>{permissions.foreground}</Text>
-        <Pressable style={styles.button} onPress={requestForeground}>
+        <Pressable
+          style={({ pressed }) => [
+            styles.button,
+            pressed && styles.buttonPressed,
+          ]}
+          onPress={requestForeground}
+        >
           <Text style={styles.buttonText}>Allow while using app</Text>
         </Pressable>
       </View>
@@ -102,7 +115,13 @@ export default function PermissionsScreen() {
       <View style={styles.card}>
         <Text style={styles.label}>Background location</Text>
         <Text style={styles.value}>{permissions.background}</Text>
-        <Pressable style={styles.button} onPress={requestBackground}>
+        <Pressable
+          style={({ pressed }) => [
+            styles.button,
+            pressed && styles.buttonPressed,
+          ]}
+          onPress={requestBackground}
+        >
           <Text style={styles.buttonText}>Allow background recording</Text>
         </Pressable>
       </View>
@@ -113,7 +132,13 @@ export default function PermissionsScreen() {
         <Text style={styles.muted}>
           Needed to connect to Garmin watches broadcasting heart rate.
         </Text>
-        <Pressable style={styles.button} onPress={requestBluetooth}>
+        <Pressable
+          style={({ pressed }) => [
+            styles.button,
+            pressed && styles.buttonPressed,
+          ]}
+          onPress={requestBluetooth}
+        >
           <Text style={styles.buttonText}>Allow Bluetooth</Text>
         </Pressable>
       </View>
@@ -174,16 +199,32 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.success,
       padding: 14,
     },
+    buttonPressed: {
+      opacity: 0.78,
+      transform: [{ scale: 0.97 }],
+    },
     buttonText: {
       color: '#fff',
       fontSize: 16,
       fontWeight: '700',
     },
-    link: {
+    backToRideButton: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    backToRideButtonText: {
       color: colors.accent,
-      fontSize: 16,
+      fontSize: 13,
       fontWeight: '900',
-      paddingTop: 5,
+    },
+    subtleButtonPressed: {
+      borderColor: colors.accent,
+      backgroundColor: colors.accentSoft,
+      opacity: 0.82,
+      transform: [{ scale: 0.98 }],
     },
   });
 }

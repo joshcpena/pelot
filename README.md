@@ -9,29 +9,25 @@ npm install
 npm run start
 ```
 
-Android maps need a Google Maps API key:
+Native maps, place search, and bike routing need MapTiler and OpenRouteService
+API keys:
 
 ```sh
 cp .env.example .env
 npm run android
 ```
 
-Set `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` in `.env` before starting Expo. For
-native Android Gradle builds, the committed manifest uses a placeholder and
-Gradle reads the key from either the `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY`
-environment variable or an uncommitted `googleMapsApiKey=...` entry in
-`android/local.properties`.
+Set these in `.env` before starting Expo:
 
-Do not commit real API keys. The checked-in
-`android/app/src/main/AndroidManifest.xml` must keep
-`android:value="${googleMapsApiKey}"`.
+```sh
+EXPO_PUBLIC_MAPTILER_API_KEY=...
+EXPO_PUBLIC_OPENROUTESERVICE_API_KEY=...
+```
 
-Expo Go cannot apply the Android native Google Maps API key from app config. To
-test Android maps with your key, use a development build such as
-`npx expo run:android` after setting `.env`.
+Do not commit real API keys. MapLibre is native code and cannot run in Expo Go;
+use a development build such as `npx expo run:android` after setting `.env`.
 
-If Android shows only the Google logo and map controls, see
-`docs/android-google-maps.md` for the required Google Cloud API key settings.
+See `docs/maplibre-services.md` for map, search, and routing setup notes.
 
 Useful checks:
 
