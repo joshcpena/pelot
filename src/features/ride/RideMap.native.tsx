@@ -428,8 +428,8 @@ export function RideMap({
           />
         ) : null}
       </MapView>
-      <View style={styles.mapHud} pointerEvents="box-none">
-        {activeNavigationStep ? (
+      {activeNavigationStep ? (
+        <View style={styles.mapHud} pointerEvents="box-none">
           <View
             style={[
               styles.navigationBanner,
@@ -450,15 +450,31 @@ export function RideMap({
               {activeNavigationStep.instruction}
             </Text>
           </View>
-        ) : null}
-        <View style={styles.mapActions}>
-          <Pressable style={styles.mapActionButton} onPress={recenterMap}>
-            <Text style={styles.mapActionText}>Center</Text>
-          </Pressable>
-          <Pressable style={styles.mapActionButton} onPress={showWholeRoute}>
-            <Text style={styles.mapActionText}>Route</Text>
-          </Pressable>
         </View>
+      ) : null}
+      <View style={styles.mapActions} pointerEvents="box-none">
+        <Pressable
+          accessibilityLabel="Center map"
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.mapActionButton,
+            pressed && styles.mapActionButtonPressed,
+          ]}
+          onPress={recenterMap}
+        >
+          <Text style={styles.mapActionIcon}>⌖</Text>
+        </Pressable>
+        <Pressable
+          accessibilityLabel="Show whole route"
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.mapActionButton,
+            pressed && styles.mapActionButtonPressed,
+          ]}
+          onPress={showWholeRoute}
+        >
+          <Text style={styles.mapActionIcon}>↝</Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -479,10 +495,6 @@ function createStyles(colors: ThemeColors) {
       top: 14,
       right: 14,
       left: 14,
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      justifyContent: 'space-between',
-      gap: 12,
     },
     navigationBanner: {
       flex: 1,
@@ -518,20 +530,35 @@ function createStyles(colors: ThemeColors) {
       color: colors.primaryText,
     },
     mapActions: {
-      gap: 8,
+      position: 'absolute',
+      right: 12,
+      bottom: 12,
+      gap: 7,
     },
     mapActionButton: {
-      minWidth: 74,
+      width: 36,
+      height: 36,
       alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
       borderRadius: 999,
-      backgroundColor: 'rgba(255, 255, 255, 0.94)',
-      paddingHorizontal: 12,
-      paddingVertical: 9,
+      backgroundColor: colors.card,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 3 },
+      shadowOpacity: 0.18,
+      shadowRadius: 7,
+      elevation: 4,
     },
-    mapActionText: {
-      color: '#0d1117',
-      fontSize: 13,
+    mapActionButtonPressed: {
+      opacity: 0.72,
+      transform: [{ scale: 0.96 }],
+    },
+    mapActionIcon: {
+      color: colors.primaryText,
+      fontSize: 20,
       fontWeight: '900',
+      lineHeight: 22,
     },
     destinationMarker: {
       width: 34,
