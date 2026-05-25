@@ -159,7 +159,13 @@ export function estimateActiveCyclingCaloriesKcal(
     const met = getCyclingMet(averageSpeedMps);
     const movingMinutes = movingSeconds / 60;
 
-    return Math.max(0, met - 1) * 3.5 * getEstimatedWeightKg(settings) * movingMinutes / 200;
+    return (
+      (Math.max(0, met - 1) *
+        3.5 *
+        getEstimatedWeightKg(settings) *
+        movingMinutes) /
+      200
+    );
   }
 
   const met = getCyclingMet(averageSpeedMps);

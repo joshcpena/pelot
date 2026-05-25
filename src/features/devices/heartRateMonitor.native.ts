@@ -335,7 +335,9 @@ export function useHeartRateMonitor(
         }
 
         const subscriptionType: CharacteristicSubscriptionType =
-          measurementCharacteristic.isNotifiable ? 'notification' : 'indication';
+          measurementCharacteristic.isNotifiable
+            ? 'notification'
+            : 'indication';
 
         if (!isMounted) {
           return;

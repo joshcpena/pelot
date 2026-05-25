@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Camera,
   type CameraRef,
@@ -51,6 +51,17 @@ const MANEUVER_COMPLETE_DISTANCE_METERS = 35;
 const SEARCH_RESULTS_FIT_RADIUS_METERS = 5000;
 const NAVIGATION_CAMERA_PADDING = { top: 118, right: 0, bottom: 0, left: 0 };
 const COMPASS_NEEDLE_ICON = require('../../../assets/compass-needle.png');
+
+type RideMapProps = {
+  destinationOptions?: DestinationOption[];
+  isNavigating?: boolean;
+  onCancelNavigation?: () => void;
+  onLongPress?: () => void;
+  points: RidePoint[];
+  mapType: RideSettings['mapType'];
+  plannedRoute?: PlannedRoute | null;
+  unitSystem: RideSettings['unitSystem'];
+};
 
 function toCoordinate(point: { latitude: number; longitude: number }) {
   return {
@@ -192,16 +203,22 @@ function getClosestRouteIndex(
   coordinate: RouteCoordinate,
   routeCoordinates: RouteCoordinate[],
 ) {
-  return routeCoordinates.reduce(
-    (best, candidate, index) => {
-      const distanceMeters = distanceBetweenCoordinates(coordinate, candidate);
+  let closestIndex = 0;
+  let closestDistanceMeters = Number.POSITIVE_INFINITY;
 
-      return distanceMeters < best.distanceMeters
-        ? { index, distanceMeters }
-        : best;
-    },
-    { index: 0, distanceMeters: Number.POSITIVE_INFINITY },
-  ).index;
+  for (let index = 0; index < routeCoordinates.length; index += 1) {
+    const distanceMeters = distanceBetweenCoordinates(
+      coordinate,
+      routeCoordinates[index],
+    );
+
+    if (distanceMeters < closestDistanceMeters) {
+      closestIndex = index;
+      closestDistanceMeters = distanceMeters;
+    }
+  }
+
+  return closestIndex;
 }
 
 function getStepEndIndexes(
@@ -271,7 +288,50 @@ function lineFeature(
   };
 }
 
-export function RideMap({
+function getActiveNavigationStep(
+  coordinate: RouteCoordinate,
+  routeCoordinates: RouteCoordinate[],
+  steps: PlannedRouteStep[],
+  stepEndIndexes: number[],
+  unitSystem: RideSettings['unitSystem'],
+) {
+  if (steps.length === 0 || routeCoordinates.length === 0) {
+    return null;
+  }
+
+  const closestRouteIndex = getClosestRouteIndex(coordinate, routeCoordinates);
+  const currentStepIndex = stepEndIndexes.findIndex(
+    (endIndex, index) =>
+      endIndex >= closestRouteIndex - 2 || index === steps.length - 1,
+  );
+  const stepIndex = currentStepIndex < 0 ? steps.length - 1 : currentStepIndex;
+  const step = steps[stepIndex];
+  const endCoordinate = getStepEndCoordinate(step);
+  const distanceToManeuver = endCoordinate
+    ? distanceBetweenCoordinates(coordinate, endCoordinate)
+    : step.distanceMeters;
+  const displayStep =
+    distanceToManeuver != null &&
+    distanceToManeuver < MANEUVER_COMPLETE_DISTANCE_METERS &&
+    stepIndex < steps.length - 1
+      ? steps[stepIndex + 1]
+      : step;
+  const displayEndCoordinate = getStepEndCoordinate(displayStep);
+
+  return {
+    instruction: displayStep.instruction,
+    glyph: getNavigationGlyph(displayStep.instruction),
+    streetName: getInstructionStreetName(displayStep),
+    distanceText: formatNavigationDistance(
+      displayEndCoordinate
+        ? distanceBetweenCoordinates(coordinate, displayEndCoordinate)
+        : displayStep.distanceMeters,
+      unitSystem,
+    ),
+  };
+}
+
+function RideMapComponent({
   destinationOptions = [],
   isNavigating = false,
   onCancelNavigation,
@@ -280,16 +340,7 @@ export function RideMap({
   mapType,
   plannedRoute,
   unitSystem,
-}: {
-  destinationOptions?: DestinationOption[];
-  isNavigating?: boolean;
-  onCancelNavigation?: () => void;
-  onLongPress?: () => void;
-  points: RidePoint[];
-  mapType: RideSettings['mapType'];
-  plannedRoute?: PlannedRoute | null;
-  unitSystem: RideSettings['unitSystem'];
-}) {
+}: RideMapProps) {
   const cameraRef = useRef<CameraRef | null>(null);
   const fittedDestinationKeyRef = useRef<string | null>(null);
   const isProgrammaticCameraMoveRef = useRef(false);
@@ -301,27 +352,40 @@ export function RideMap({
   const [isTopDownView, setIsTopDownView] = useState(false);
   const [currentCoordinate, setCurrentCoordinate] =
     useState<RouteCoordinate | null>(null);
-  const coordinates = points.map(toCoordinate);
+  const coordinates = useMemo(() => points.map(toCoordinate), [points]);
   const plannedCoordinates = plannedRoute?.coordinates;
-  const plannedStepEndIndexes = plannedRoute?.steps.length
-    ? getStepEndIndexes(plannedCoordinates ?? [], plannedRoute.steps)
-    : [];
-  const destinationCoordinates = destinationOptions.map(
-    (option) => option.coordinate,
+  const plannedSteps = plannedRoute?.steps;
+  const plannedStepEndIndexes = useMemo(
+    () =>
+      plannedCoordinates && plannedSteps?.length
+        ? getStepEndIndexes(plannedCoordinates, plannedSteps)
+        : [],
+    [plannedCoordinates, plannedSteps],
   );
-  const destinationFitKey = destinationOptions
-    .map(
-      (option) =>
-        `${option.id}:${option.coordinate.latitude},${option.coordinate.longitude}`,
-    )
-    .join('|');
+  const destinationCoordinates = useMemo(
+    () => destinationOptions.map((option) => option.coordinate),
+    [destinationOptions],
+  );
+  const destinationFitKey = useMemo(
+    () =>
+      destinationOptions
+        .map(
+          (option) =>
+            `${option.id}:${option.coordinate.latitude},${option.coordinate.longitude}`,
+        )
+        .join('|'),
+    [destinationOptions],
+  );
   const lastPoint = points[points.length - 1];
   const lastLatitude = lastPoint?.latitude;
   const lastLongitude = lastPoint?.longitude;
-  const lastCoordinate =
-    lastLatitude !== undefined && lastLongitude !== undefined
-      ? { latitude: lastLatitude, longitude: lastLongitude }
-      : null;
+  const lastCoordinate = useMemo(
+    () =>
+      lastLatitude !== undefined && lastLongitude !== undefined
+        ? { latitude: lastLatitude, longitude: lastLongitude }
+        : null,
+    [lastLatitude, lastLongitude],
+  );
   const currentMarkerCoordinate = lastCoordinate ?? currentCoordinate;
   const mapCenter = lastCoordinate ?? currentCoordinate ?? DEFAULT_COORDINATE;
   const mapHeading = getHeading(points);
@@ -342,15 +406,29 @@ export function RideMap({
     () => lineFeature('planned-route', plannedCoordinates ?? []),
     [plannedCoordinates],
   );
-  const activeNavigationStep =
-    isNavigating && plannedRoute && lastCoordinate && plannedCoordinates?.length
-      ? getActiveNavigationStep(
-          lastCoordinate,
-          plannedCoordinates,
-          plannedRoute.steps,
-          plannedStepEndIndexes,
-        )
-      : null;
+  const activeNavigationStep = useMemo(
+    () =>
+      isNavigating &&
+      plannedRoute &&
+      lastCoordinate &&
+      plannedCoordinates?.length
+        ? getActiveNavigationStep(
+            lastCoordinate,
+            plannedCoordinates,
+            plannedRoute.steps,
+            plannedStepEndIndexes,
+            unitSystem,
+          )
+        : null,
+    [
+      isNavigating,
+      lastCoordinate,
+      plannedCoordinates,
+      plannedRoute,
+      plannedStepEndIndexes,
+      unitSystem,
+    ],
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -569,52 +647,6 @@ export function RideMap({
     }
   }
 
-  function getActiveNavigationStep(
-    coordinate: RouteCoordinate,
-    routeCoordinates: RouteCoordinate[],
-    steps: PlannedRouteStep[],
-    stepEndIndexes: number[],
-  ) {
-    if (steps.length === 0 || routeCoordinates.length === 0) {
-      return null;
-    }
-
-    const closestRouteIndex = getClosestRouteIndex(
-      coordinate,
-      routeCoordinates,
-    );
-    const currentStepIndex = stepEndIndexes.findIndex(
-      (endIndex, index) =>
-        endIndex >= closestRouteIndex - 2 || index === steps.length - 1,
-    );
-    const stepIndex =
-      currentStepIndex < 0 ? steps.length - 1 : currentStepIndex;
-    const step = steps[stepIndex];
-    const endCoordinate = getStepEndCoordinate(step);
-    const distanceToManeuver = endCoordinate
-      ? distanceBetweenCoordinates(coordinate, endCoordinate)
-      : step.distanceMeters;
-    const displayStep =
-      distanceToManeuver != null &&
-      distanceToManeuver < MANEUVER_COMPLETE_DISTANCE_METERS &&
-      stepIndex < steps.length - 1
-        ? steps[stepIndex + 1]
-        : step;
-    const displayEndCoordinate = getStepEndCoordinate(displayStep);
-
-    return {
-      instruction: displayStep.instruction,
-      glyph: getNavigationGlyph(displayStep.instruction),
-      streetName: getInstructionStreetName(displayStep),
-      distanceText: formatNavigationDistance(
-        displayEndCoordinate
-          ? distanceBetweenCoordinates(coordinate, displayEndCoordinate)
-          : displayStep.distanceMeters,
-        unitSystem,
-      ),
-    };
-  }
-
   return (
     <View style={styles.container}>
       <Map
@@ -777,6 +809,21 @@ export function RideMap({
     </View>
   );
 }
+
+function areRideMapPropsEqual(previous: RideMapProps, next: RideMapProps) {
+  return (
+    previous.destinationOptions === next.destinationOptions &&
+    previous.isNavigating === next.isNavigating &&
+    Boolean(previous.onCancelNavigation) === Boolean(next.onCancelNavigation) &&
+    Boolean(previous.onLongPress) === Boolean(next.onLongPress) &&
+    previous.points === next.points &&
+    previous.mapType === next.mapType &&
+    previous.plannedRoute === next.plannedRoute &&
+    previous.unitSystem === next.unitSystem
+  );
+}
+
+export const RideMap = memo(RideMapComponent, areRideMapPropsEqual);
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({

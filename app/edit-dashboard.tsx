@@ -308,7 +308,9 @@ function SizePickerModal({
                   styles.spanButton,
                   card?.span === span && styles.spanButtonSelected,
                   pressed && styles.subtleButtonPressed,
-                  pressed && card?.span === span && styles.selectedButtonPressed,
+                  pressed &&
+                    card?.span === span &&
+                    styles.selectedButtonPressed,
                 ]}
                 onPress={() => onSelect(span)}
               >

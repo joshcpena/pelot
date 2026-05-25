@@ -149,7 +149,10 @@ export function HistoryRouteMap({ points }: { points: RidePoint[] }) {
         touchZoom={false}
         onDidFinishLoadingStyle={() => setLoadedMapStyle(mapStyleKey)}
       >
-        <Camera ref={cameraRef} initialViewState={getInitialViewState(coordinates)} />
+        <Camera
+          ref={cameraRef}
+          initialViewState={getInitialViewState(coordinates)}
+        />
         <GeoJSONSource id="history-route-source" data={routeFeature}>
           <Layer
             id="history-route"

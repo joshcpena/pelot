@@ -6,7 +6,10 @@ const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const CARTO_DARK_TILE_URL =
   'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png';
 
-function getRasterStyle(tileUrl: string, attribution: string): StyleSpecification {
+function getRasterStyle(
+  tileUrl: string,
+  attribution: string,
+): StyleSpecification {
   return {
     version: 8,
     sources: {
@@ -59,10 +62,10 @@ export function getRideMapStyle(
           ? 'outdoor-v2-dark'
           : 'outdoor-v2'
         : mapType === 'hybrid'
-        ? 'hybrid'
-        : colorScheme === 'dark'
-          ? 'streets-v4-dark'
-          : 'streets-v4';
+          ? 'hybrid'
+          : colorScheme === 'dark'
+            ? 'streets-v4-dark'
+            : 'streets-v4';
 
   return getMapTilerRasterStyle(styleId, mapTilerApiKey);
 }

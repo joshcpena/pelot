@@ -79,7 +79,9 @@ export type SearchDestinationsInput = {
   origin: RouteCoordinate;
 };
 
-function toCoordinate(coordinate: [number, number, ...number[]]): RouteCoordinate {
+function toCoordinate(
+  coordinate: [number, number, ...number[]],
+): RouteCoordinate {
   return {
     longitude: coordinate[0],
     latitude: coordinate[1],
@@ -205,7 +207,8 @@ function toDestinationOptions(
           id:
             feature.id ??
             `${coordinate?.[1] ?? 0},${coordinate?.[0] ?? 0},${index}`,
-          name: feature.text ?? feature.properties?.name ?? address ?? destination,
+          name:
+            feature.text ?? feature.properties?.name ?? address ?? destination,
           address,
           coordinate: toCoordinate(coordinate as [number, number, ...number[]]),
         };
@@ -228,7 +231,9 @@ function dedupeDestinationOptions(options: DestinationOption[]) {
   });
 }
 
-function getAddress(feature: NonNullable<MapTilerGeocodingResponse['features']>[number]) {
+function getAddress(
+  feature: NonNullable<MapTilerGeocodingResponse['features']>[number],
+) {
   const properties = feature.properties;
   const structuredAddress = [
     properties?.address,
@@ -239,7 +244,9 @@ function getAddress(feature: NonNullable<MapTilerGeocodingResponse['features']>[
     .filter(Boolean)
     .join(', ');
 
-  return (feature.place_name ?? feature.place_name_en ?? structuredAddress) || null;
+  return (
+    (feature.place_name ?? feature.place_name_en ?? structuredAddress) || null
+  );
 }
 
 export async function searchBikeDestinations({
@@ -322,7 +329,10 @@ export async function planBikeRoute({
 
   if (!response.ok) {
     throw new Error(
-      await getApiErrorMessage(response, 'OpenRouteService route request failed'),
+      await getApiErrorMessage(
+        response,
+        'OpenRouteService route request failed',
+      ),
     );
   }
 
@@ -332,7 +342,8 @@ export async function planBikeRoute({
 
   if (!route || !routeCoordinates || routeCoordinates.length < 2) {
     throw new Error(
-      routes.error?.message ?? 'OpenRouteService could not plan a bicycling route.',
+      routes.error?.message ??
+        'OpenRouteService could not plan a bicycling route.',
     );
   }
 

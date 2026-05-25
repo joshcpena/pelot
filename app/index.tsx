@@ -123,8 +123,8 @@ function distanceBetweenCoordinates(a: RouteCoordinate, b: RouteCoordinate) {
   const haversine =
     Math.sin(deltaLatitude / 2) ** 2 +
     Math.cos(latitudeA) *
-    Math.cos(latitudeB) *
-    Math.sin(deltaLongitude / 2) ** 2;
+      Math.cos(latitudeB) *
+      Math.sin(deltaLongitude / 2) ** 2;
 
   return (
     earthRadiusMeters *
@@ -149,7 +149,10 @@ function distanceToRouteMeters(
   const metersPerDegreeLongitude =
     metersPerDegreeLatitude * Math.cos((coordinate.latitude * Math.PI) / 180);
 
-  return routeCoordinates.slice(0, -1).reduce((bestDistance, start, index) => {
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (let index = 0; index < routeCoordinates.length - 1; index += 1) {
+    const start = routeCoordinates[index];
     const end = routeCoordinates[index + 1];
     const startX =
       (start.longitude - coordinate.longitude) * metersPerDegreeLongitude;
@@ -165,24 +168,29 @@ function distanceToRouteMeters(
       segmentLengthSquared === 0
         ? 0
         : Math.max(
-          0,
-          Math.min(
-            1,
-            -(startX * segmentX + startY * segmentY) / segmentLengthSquared,
-          ),
-        );
+            0,
+            Math.min(
+              1,
+              -(startX * segmentX + startY * segmentY) / segmentLengthSquared,
+            ),
+          );
     const closestX = startX + segmentX * projection;
     const closestY = startY + segmentY * projection;
     const distance = Math.hypot(closestX, closestY);
 
-    return Math.min(bestDistance, distance);
-  }, Number.POSITIVE_INFINITY);
+    bestDistance = Math.min(bestDistance, distance);
+  }
+
+  return bestDistance;
 }
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { settings, isLoading: isLoadingSettings, updateSetting } =
-    useRideSettings();
+  const {
+    settings,
+    isLoading: isLoadingSettings,
+    updateSetting,
+  } = useRideSettings();
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
   const styles = createStyles(colors);
@@ -459,7 +467,7 @@ export default function HomeScreen() {
   }
 
   function saveDashboardLayout() {
-    updateSetting('dashboardLayout', layoutDraft).catch(() => { });
+    updateSetting('dashboardLayout', layoutDraft).catch(() => {});
     setIsEditingDashboard(false);
   }
 
@@ -578,7 +586,7 @@ export default function HomeScreen() {
   }
 
   function completeWelcome() {
-    updateSetting('hasCompletedWelcome', true).catch(() => { });
+    updateSetting('hasCompletedWelcome', true).catch(() => {});
   }
 
   async function getRouteOrigin() {
@@ -851,9 +859,9 @@ export default function HomeScreen() {
             style={({ pressed }) => [
               styles.primaryButton,
               pressed &&
-              !isSearchingDestinations &&
-              !isPlanningRoute &&
-              styles.primaryButtonPressed,
+                !isSearchingDestinations &&
+                !isPlanningRoute &&
+                styles.primaryButtonPressed,
               isSearchingDestinations || isPlanningRoute
                 ? styles.disabledButton
                 : null,
@@ -1250,8 +1258,8 @@ export default function HomeScreen() {
                     style={({ pressed }) => [
                       styles.primaryButton,
                       pressed &&
-                      !isPromptingWelcomePermissions &&
-                      styles.primaryButtonPressed,
+                        !isPromptingWelcomePermissions &&
+                        styles.primaryButtonPressed,
                       isPromptingWelcomePermissions && styles.disabledButton,
                     ]}
                     onPress={promptForWelcomePermissions}
@@ -1447,8 +1455,8 @@ function DashboardSizePickerModal({
                           card?.span === span && styles.spanButtonSelected,
                           pressed && styles.subtleButtonPressed,
                           pressed &&
-                          card?.span === span &&
-                          styles.selectedButtonPressed,
+                            card?.span === span &&
+                            styles.selectedButtonPressed,
                         ]}
                         onPress={() => onSelect(span)}
                       >
@@ -1456,7 +1464,7 @@ function DashboardSizePickerModal({
                           style={[
                             styles.spanButtonText,
                             card?.span === span &&
-                            styles.spanButtonTextSelected,
+                              styles.spanButtonTextSelected,
                           ]}
                         >
                           {span}

@@ -41,8 +41,8 @@ export function RideMap({
       {plannedRoute ? (
         <Text style={styles.copy}>
           {isNavigating ? 'Navigating' : 'Planned bike route'} to{' '}
-          {plannedRoute.destination}:{' '}
-          {plannedRoute.distanceText}, {plannedRoute.durationText}.
+          {plannedRoute.destination}: {plannedRoute.distanceText},{' '}
+          {plannedRoute.durationText}.
         </Text>
       ) : null}
       {destinationOptions && destinationOptions.length > 0 ? (
