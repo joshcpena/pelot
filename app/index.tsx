@@ -1393,10 +1393,14 @@ function DashboardSizePickerModal({
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Customize</Text>
             <Pressable
-              style={({ pressed }) => pressed && styles.linkButtonPressed}
+              accessibilityLabel="Close customize"
+              style={({ pressed }) => [
+                styles.navigationCloseButton,
+                pressed && styles.subtleButtonPressed,
+              ]}
               onPress={onClose}
             >
-              <Text style={styles.modalCloseLink}>Close</Text>
+              <Text style={styles.navigationCloseText}>Close</Text>
             </Pressable>
           </View>
           <View style={styles.sizeOptions}>
