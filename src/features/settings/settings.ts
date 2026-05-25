@@ -16,6 +16,7 @@ import {
 import type { RideSettings } from '../ride/types';
 
 export const defaultRideSettings: RideSettings = {
+  hasCompletedWelcome: false,
   unitSystem: 'imperial',
   keepAwakeDuringRide: true,
   autoDimScreen: true,
@@ -26,7 +27,7 @@ export const defaultRideSettings: RideSettings = {
   splitType: 'time',
   splitDistanceMeters: 1609.344,
   splitDurationSeconds: 600,
-  theme: 'system',
+  theme: 'light',
   mapType: 'standard',
   routeProfile: 'bike',
   dashboardLayout: defaultDashboardLayout,

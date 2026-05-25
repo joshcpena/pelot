@@ -21,6 +21,7 @@ lerna-debug.log*
 .env.test
 .env.production
 android/local.properties
+google-service-account.json
 
 # temp directory
 .temp

@@ -170,6 +170,7 @@ export type PlannedRouteStep = {
 };
 
 export type RideSettings = {
+  hasCompletedWelcome: boolean;
   unitSystem: UnitSystem;
   keepAwakeDuringRide: boolean;
   autoDimScreen: boolean;

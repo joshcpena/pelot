@@ -18,7 +18,9 @@ import {
 } from '../src/features/settings/settings';
 import type { RideSettings } from '../src/features/ride/types';
 import {
+  requestHeartRateBluetoothAccess,
   scanHeartRateDevices,
+  type BluetoothAccessState,
   type ScannedHeartRateDevice,
 } from '../src/features/devices/heartRateMonitor';
 
@@ -136,6 +138,19 @@ function getRouteProfileLabel(routeProfile: RideSettings['routeProfile']) {
   }
 }
 
+function getBluetoothAccessMessage(accessState: BluetoothAccessState) {
+  switch (accessState) {
+    case 'denied':
+      return 'Enable Bluetooth permission to scan for heart rate devices.';
+    case 'powered-off':
+      return 'Turn on Bluetooth to scan for heart rate devices.';
+    case 'unavailable':
+      return 'Bluetooth is not available right now.';
+    case 'granted':
+      return null;
+  }
+}
+
 export default function SettingsScreen() {
   const router = useRouter();
   const { settings, isLoading, updateSetting } = useRideSettings();
@@ -221,9 +236,17 @@ export default function SettingsScreen() {
 
   async function scanForHeartRateDevices() {
     setScanError(null);
-    setIsScanning(true);
 
     try {
+      const accessState = await requestHeartRateBluetoothAccess();
+      const accessMessage = getBluetoothAccessMessage(accessState);
+
+      if (accessMessage) {
+        setScanError(accessMessage);
+        return;
+      }
+
+      setIsScanning(true);
       setHeartRateDevices(await scanHeartRateDevices());
     } catch (error) {
       setScanError(

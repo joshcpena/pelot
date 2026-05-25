@@ -224,6 +224,11 @@ export function DashboardGrid({
             destinationOptions={context.destinationOptions}
             isNavigating={context.isNavigating}
             onCancelNavigation={onCancelNavigation}
+            onLongPress={
+              !isEditing && onLongPressCard
+                ? () => onLongPressCard(card)
+                : undefined
+            }
             points={context.routePoints}
             mapType={settings.mapType}
             plannedRoute={context.plannedRoute}

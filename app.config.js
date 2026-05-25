@@ -10,7 +10,7 @@ module.exports = {
     userInterfaceStyle: 'automatic',
     scheme: 'pelot',
     ios: {
-      bundleIdentifier: 'com.josh.pelot',
+      bundleIdentifier: 'com.sevro.pelot',
       supportsTablet: true,
       infoPlist: {
         NSLocationWhenInUseUsageDescription:
@@ -25,7 +25,8 @@ module.exports = {
       },
     },
     android: {
-      package: 'com.josh.pelot',
+      package: 'com.sevro.pelot',
+      icon: './assets/icon.png',
       permissions: [
         'ACCESS_COARSE_LOCATION',
         'ACCESS_FINE_LOCATION',
@@ -39,15 +40,13 @@ module.exports = {
         'RECEIVE_BOOT_COMPLETED',
       ],
       adaptiveIcon: {
-        backgroundColor: '#E6F4FE',
-        foregroundImage: './assets/android-icon-foreground.png',
-        backgroundImage: './assets/android-icon-background.png',
-        monochromeImage: './assets/android-icon-monochrome.png',
+        backgroundColor: '#ffffff',
+        foregroundImage: './assets/icon.png',
       },
       predictiveBackGestureEnabled: false,
     },
     web: {
-      favicon: './assets/favicon.png',
+      favicon: './assets/icon.png',
     },
     extra: {
       eas: {
@@ -57,6 +56,14 @@ module.exports = {
     plugins: [
       'expo-router',
       'expo-sqlite',
+      [
+        'expo-splash-screen',
+        {
+          backgroundColor: '#ffffff',
+          image: './assets/icon.png',
+          imageWidth: 200,
+        },
+      ],
       '@maplibre/maplibre-react-native',
       [
         'expo-location',

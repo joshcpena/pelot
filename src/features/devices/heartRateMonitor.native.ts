@@ -97,6 +97,10 @@ export async function requestHeartRateBluetoothAccess(): Promise<BluetoothAccess
     return 'powered-off';
   }
 
+  if (state === 'Unauthorized') {
+    return 'denied';
+  }
+
   return 'unavailable';
 }
 

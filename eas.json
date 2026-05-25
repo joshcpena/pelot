@@ -5,6 +5,7 @@
   },
   "build": {
     "preview": {
+      "node": "25.0.0",
       "env": {
         "NODE_ENV": "production"
       },
@@ -13,8 +14,18 @@
       }
     },
     "production": {
+      "node": "25.0.0",
       "env": {
         "NODE_ENV": "production"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "./google-service-account.json",
+        "track": "production",
+        "releaseStatus": "completed"
       }
     }
   }

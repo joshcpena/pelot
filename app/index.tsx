@@ -44,7 +44,11 @@ import type {
   RouteCoordinate,
 } from '../src/features/ride/types';
 import { useForegroundRideRecorder } from '../src/features/ride/useForegroundRideRecorder';
-import { useHeartRateMonitor } from '../src/features/devices/heartRateMonitor';
+import {
+  requestHeartRateBluetoothAccess,
+  useHeartRateMonitor,
+  type BluetoothAccessState,
+} from '../src/features/devices/heartRateMonitor';
 import { useDeviceBatteryLevel } from '../src/features/devices/battery';
 import { useRideWeatherSamples } from '../src/features/ride/weather';
 
@@ -119,8 +123,8 @@ function distanceBetweenCoordinates(a: RouteCoordinate, b: RouteCoordinate) {
   const haversine =
     Math.sin(deltaLatitude / 2) ** 2 +
     Math.cos(latitudeA) *
-      Math.cos(latitudeB) *
-      Math.sin(deltaLongitude / 2) ** 2;
+    Math.cos(latitudeB) *
+    Math.sin(deltaLongitude / 2) ** 2;
 
   return (
     earthRadiusMeters *
@@ -161,12 +165,12 @@ function distanceToRouteMeters(
       segmentLengthSquared === 0
         ? 0
         : Math.max(
-            0,
-            Math.min(
-              1,
-              -(startX * segmentX + startY * segmentY) / segmentLengthSquared,
-            ),
-          );
+          0,
+          Math.min(
+            1,
+            -(startX * segmentX + startY * segmentY) / segmentLengthSquared,
+          ),
+        );
     const closestX = startX + segmentX * projection;
     const closestY = startY + segmentY * projection;
     const distance = Math.hypot(closestX, closestY);
@@ -177,7 +181,8 @@ function distanceToRouteMeters(
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { settings, updateSetting } = useRideSettings();
+  const { settings, isLoading: isLoadingSettings, updateSetting } =
+    useRideSettings();
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
   const styles = createStyles(colors);
@@ -211,6 +216,12 @@ export default function HomeScreen() {
   const [isEditingDashboard, setIsEditingDashboard] = useState(false);
   const [layoutDraft, setLayoutDraft] = useState(settings.dashboardLayout);
   const [dashboardHeight, setDashboardHeight] = useState(0);
+  const [welcomeStep, setWelcomeStep] = useState(0);
+  const [isPromptingWelcomePermissions, setIsPromptingWelcomePermissions] =
+    useState(false);
+  const [welcomePermissionMessage, setWelcomePermissionMessage] = useState<
+    string | null
+  >(null);
   const [metricPickerCardId, setMetricPickerCardId] = useState<string | null>(
     null,
   );
@@ -448,7 +459,7 @@ export default function HomeScreen() {
   }
 
   function saveDashboardLayout() {
-    updateSetting('dashboardLayout', layoutDraft).catch(() => {});
+    updateSetting('dashboardLayout', layoutDraft).catch(() => { });
     setIsEditingDashboard(false);
   }
 
@@ -505,6 +516,69 @@ export default function HomeScreen() {
       setLayoutDraft(settings.dashboardLayout);
       setIsEditingDashboard(true);
     }
+  }
+
+  function getBluetoothWelcomeMessage(accessState: BluetoothAccessState) {
+    switch (accessState) {
+      case 'granted':
+        return null;
+      case 'denied':
+        return 'Bluetooth permission was not enabled. You can enable it later from Permissions.';
+      case 'powered-off':
+        return 'Bluetooth is turned off. Turn it on when you want to connect fitness devices.';
+      case 'unavailable':
+        return 'Bluetooth is not available right now. You can try again later from Permissions.';
+    }
+  }
+
+  async function promptForWelcomePermissions() {
+    setWelcomePermissionMessage(null);
+    setIsPromptingWelcomePermissions(true);
+
+    try {
+      const foreground = await Location.requestForegroundPermissionsAsync();
+      const background =
+        foreground.status === Location.PermissionStatus.GRANTED
+          ? await Location.requestBackgroundPermissionsAsync()
+          : null;
+      const bluetooth = await requestHeartRateBluetoothAccess();
+      const messages: string[] = [];
+
+      if (foreground.status !== Location.PermissionStatus.GRANTED) {
+        messages.push(
+          'Location permission was not enabled. Pelot needs it to track rides.',
+        );
+      } else if (
+        background &&
+        background.status !== Location.PermissionStatus.GRANTED
+      ) {
+        messages.push(
+          'Location is enabled for active rides. Enable background location later to keep recording when Pelot is not open.',
+        );
+      }
+
+      const bluetoothMessage = getBluetoothWelcomeMessage(bluetooth);
+
+      if (bluetoothMessage) {
+        messages.push(bluetoothMessage);
+      }
+
+      setWelcomePermissionMessage(
+        messages.length > 0
+          ? messages.join(' ')
+          : 'Permissions are ready. You can track rides and connect fitness devices.',
+      );
+    } catch {
+      setWelcomePermissionMessage(
+        'Could not finish permission setup. You can try again from Permissions.',
+      );
+    } finally {
+      setIsPromptingWelcomePermissions(false);
+    }
+  }
+
+  function completeWelcome() {
+    updateSetting('hasCompletedWelcome', true).catch(() => { });
   }
 
   async function getRouteOrigin() {
@@ -770,16 +844,16 @@ export default function HomeScreen() {
               setIsRoutePlannerOpen(false);
             }}
           >
-            <Text style={styles.secondaryButtonText}>Cancel</Text>
+            <Text style={styles.modalSecondaryButtonText}>Cancel</Text>
           </Pressable>
           <Pressable
             disabled={isSearchingDestinations || isPlanningRoute}
             style={({ pressed }) => [
               styles.primaryButton,
               pressed &&
-                !isSearchingDestinations &&
-                !isPlanningRoute &&
-                styles.primaryButtonPressed,
+              !isSearchingDestinations &&
+              !isPlanningRoute &&
+              styles.primaryButtonPressed,
               isSearchingDestinations || isPlanningRoute
                 ? styles.disabledButton
                 : null,
@@ -873,6 +947,9 @@ export default function HomeScreen() {
       </Animated.View>
     </View>
   ) : null;
+
+  const welcomeModalVisible =
+    !isLoadingSettings && !settings.hasCompletedWelcome;
 
   return (
     <>
@@ -1132,6 +1209,103 @@ export default function HomeScreen() {
         }}
         onSelect={chooseDashboardSpan}
       />
+      <Modal
+        animationType="slide"
+        transparent
+        visible={welcomeModalVisible}
+        onRequestClose={completeWelcome}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.welcomeCard}>
+            <View style={styles.welcomeStepIndicator}>
+              <View
+                style={[
+                  styles.welcomeStepDot,
+                  welcomeStep === 0 && styles.welcomeStepDotActive,
+                ]}
+              />
+              <View
+                style={[
+                  styles.welcomeStepDot,
+                  welcomeStep === 1 && styles.welcomeStepDotActive,
+                ]}
+              />
+            </View>
+
+            {welcomeStep === 0 ? (
+              <>
+                <Text style={styles.modalTitle}>Welcome to Pelot</Text>
+                <Text style={styles.modalCopy}>
+                  Enable location permissions and Bluetooth to track your ride
+                  and connect to your fitness devices.
+                </Text>
+                {welcomePermissionMessage ? (
+                  <Text style={styles.welcomeStatus}>
+                    {welcomePermissionMessage}
+                  </Text>
+                ) : null}
+                <View style={styles.modalActions}>
+                  <Pressable
+                    disabled={isPromptingWelcomePermissions}
+                    style={({ pressed }) => [
+                      styles.primaryButton,
+                      pressed &&
+                      !isPromptingWelcomePermissions &&
+                      styles.primaryButtonPressed,
+                      isPromptingWelcomePermissions && styles.disabledButton,
+                    ]}
+                    onPress={promptForWelcomePermissions}
+                  >
+                    <Text style={styles.primaryButtonText}>
+                      {isPromptingWelcomePermissions
+                        ? 'Requesting...'
+                        : 'Allow access'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.modalSecondaryButton,
+                      pressed && styles.subtleButtonPressed,
+                    ]}
+                    onPress={() => setWelcomeStep(1)}
+                  >
+                    <Text style={styles.modalSecondaryButtonText}>Next</Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : (
+              <>
+                <Text style={styles.modalTitle}>Edit your dashboard</Text>
+                <Text style={styles.modalCopy}>
+                  Press and hold any metric tile to edit your ride dashboard.
+                  Drag and drop tiles to your desired location, add a new one,
+                  or tap a tile again to customize the metric and its size.
+                </Text>
+                <View style={styles.modalActions}>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.modalSecondaryButton,
+                      pressed && styles.subtleButtonPressed,
+                    ]}
+                    onPress={() => setWelcomeStep(0)}
+                  >
+                    <Text style={styles.modalSecondaryButtonText}>Back</Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.primaryButton,
+                      pressed && styles.primaryButtonPressed,
+                    ]}
+                    onPress={completeWelcome}
+                  >
+                    <Text style={styles.primaryButtonText}>Get started</Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -1166,11 +1340,12 @@ function DashboardMetricPickerModal({
             <Text style={styles.pickerSectionTitle}>{category}</Text>
             {dashboardMetricCatalog
               .filter((metric) => metric.category === category)
-              .map((metric) => (
+              .map((metric, index, metrics) => (
                 <Pressable
                   key={metric.id}
                   style={({ pressed }) => [
                     styles.pickerRow,
+                    index === metrics.length - 1 && styles.pickerRowLast,
                     pressed && styles.listButtonPressed,
                   ]}
                   onPress={() => onSelect(metric.id)}
@@ -1268,8 +1443,8 @@ function DashboardSizePickerModal({
                           card?.span === span && styles.spanButtonSelected,
                           pressed && styles.subtleButtonPressed,
                           pressed &&
-                            card?.span === span &&
-                            styles.selectedButtonPressed,
+                          card?.span === span &&
+                          styles.selectedButtonPressed,
                         ]}
                         onPress={() => onSelect(span)}
                       >
@@ -1277,7 +1452,7 @@ function DashboardSizePickerModal({
                           style={[
                             styles.spanButtonText,
                             card?.span === span &&
-                              styles.spanButtonTextSelected,
+                            styles.spanButtonTextSelected,
                           ]}
                         >
                           {span}
@@ -1346,6 +1521,7 @@ function createStyles(colors: ThemeColors) {
     editModeButton: {
       borderWidth: 1,
       borderColor: colors.border,
+      borderRadius: 999,
       paddingHorizontal: 10,
       paddingVertical: 8,
     },
@@ -1355,6 +1531,7 @@ function createStyles(colors: ThemeColors) {
       fontWeight: '900',
     },
     editModeDoneButton: {
+      borderRadius: 999,
       backgroundColor: colors.success,
       paddingHorizontal: 12,
       paddingVertical: 9,
@@ -1669,6 +1846,7 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.background,
     },
     modalBody: {
+      gap: 12,
       paddingTop: 56,
       paddingBottom: 32,
     },
@@ -1686,26 +1864,37 @@ function createStyles(colors: ThemeColors) {
       fontWeight: '800',
     },
     pickerSection: {
+      overflow: 'hidden',
+      borderTopWidth: 1,
+      borderBottomWidth: 1,
+      borderColor: colors.border,
       backgroundColor: colors.card,
-      paddingVertical: 8,
     },
     pickerSectionTitle: {
-      color: colors.primaryText,
-      fontSize: 13,
+      borderBottomWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.elevatedCard,
+      color: colors.secondaryText,
+      fontSize: 15,
       fontWeight: '900',
-      letterSpacing: 0.8,
+      letterSpacing: 1,
       paddingHorizontal: 16,
-      paddingVertical: 8,
+      paddingTop: 12,
+      paddingBottom: 10,
       textTransform: 'uppercase',
     },
     pickerRow: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      borderTopWidth: 1,
+      borderBottomWidth: 1,
       borderColor: colors.border,
+      backgroundColor: colors.card,
       paddingHorizontal: 16,
-      paddingVertical: 12,
+      paddingVertical: 14,
+    },
+    pickerRowLast: {
+      borderBottomWidth: 0,
     },
     pickerLabel: {
       color: colors.primaryText,
@@ -1744,6 +1933,7 @@ function createStyles(colors: ThemeColors) {
     metricChangeButton: {
       width: '100%',
       alignItems: 'center',
+      borderRadius: 999,
       backgroundColor: colors.accentSoft,
       paddingHorizontal: 16,
       paddingVertical: 12,
@@ -1755,6 +1945,7 @@ function createStyles(colors: ThemeColors) {
     spanButton: {
       borderWidth: 1,
       borderColor: colors.border,
+      borderRadius: 999,
       paddingHorizontal: 16,
       paddingVertical: 12,
     },
@@ -1776,6 +1967,38 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.card,
       padding: 20,
       paddingBottom: 36,
+    },
+    welcomeCard: {
+      gap: 16,
+      borderTopLeftRadius: 28,
+      borderTopRightRadius: 28,
+      backgroundColor: colors.card,
+      padding: 20,
+      paddingBottom: 36,
+    },
+    welcomeStepIndicator: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    welcomeStepDot: {
+      width: 28,
+      height: 4,
+      borderRadius: 999,
+      backgroundColor: colors.border,
+    },
+    welcomeStepDotActive: {
+      backgroundColor: colors.accent,
+    },
+    welcomeStatus: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 16,
+      backgroundColor: colors.background,
+      color: colors.secondaryText,
+      fontSize: 14,
+      fontWeight: '700',
+      lineHeight: 20,
+      padding: 12,
     },
     modalTitle: {
       color: colors.primaryText,
@@ -1849,6 +2072,12 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.border,
       borderRadius: 999,
       padding: 16,
+    },
+    modalSecondaryButtonText: {
+      color: colors.primaryText,
+      fontSize: 15,
+      fontWeight: '900',
+      textAlign: 'center',
     },
   });
 }

@@ -85,12 +85,12 @@ export const dashboardSpans: DashboardCardSpan[] = [
 ];
 
 export const defaultDashboardLayout: DashboardCard[] = [
-  { id: 'card-map', metricId: 'map', span: '3x3' },
+  { id: 'card-map', metricId: 'map', span: '3x5' },
   { id: 'card-total-distance', metricId: 'totalDistance', span: '1.5x2' },
   { id: 'card-total-time', metricId: 'totalTimeRecorded', span: '1.5x2' },
   { id: 'card-speed-current', metricId: 'speedCurrent', span: '3x2' },
-  { id: 'card-pace-current', metricId: 'paceCurrent', span: '1.5x2' },
-  { id: 'card-calories-total', metricId: 'caloriesTotal', span: '1.5x2' },
+  { id: 'card-pace-current', metricId: 'paceCurrent', span: '1.5x1' },
+  { id: 'card-calories-total', metricId: 'caloriesTotal', span: '1.5x1' },
 ];
 
 const allSpans = dashboardSpans;

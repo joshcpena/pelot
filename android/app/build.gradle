@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.josh.pelot'
+    namespace 'com.sevro.pelot'
     defaultConfig {
-        applicationId 'com.josh.pelot'
+        applicationId 'com.sevro.pelot'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

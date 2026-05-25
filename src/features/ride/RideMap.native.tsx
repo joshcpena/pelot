@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Camera,
   type CameraRef,
@@ -10,6 +10,7 @@ import {
   type LngLat,
   type LngLatBounds,
 } from '@maplibre/maplibre-react-native';
+import { useFocusEffect } from 'expo-router';
 import * as Location from 'expo-location';
 import {
   Image,
@@ -274,6 +275,7 @@ export function RideMap({
   destinationOptions = [],
   isNavigating = false,
   onCancelNavigation,
+  onLongPress,
   points,
   mapType,
   plannedRoute,
@@ -282,6 +284,7 @@ export function RideMap({
   destinationOptions?: DestinationOption[];
   isNavigating?: boolean;
   onCancelNavigation?: () => void;
+  onLongPress?: () => void;
   points: RidePoint[];
   mapType: RideSettings['mapType'];
   plannedRoute?: PlannedRoute | null;
@@ -349,37 +352,44 @@ export function RideMap({
         )
       : null;
 
-  useEffect(() => {
-    let isMounted = true;
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
 
-    async function loadCurrentLocation() {
-      const permission = await Location.getForegroundPermissionsAsync();
+      async function loadCurrentLocation() {
+        const permission = await Location.getForegroundPermissionsAsync();
 
-      if (permission.status !== Location.PermissionStatus.GRANTED) {
-        return;
+        if (!isActive) {
+          return;
+        }
+
+        if (permission.status !== Location.PermissionStatus.GRANTED) {
+          setCurrentCoordinate(null);
+          return;
+        }
+
+        const lastKnownPosition = await Location.getLastKnownPositionAsync();
+
+        if (lastKnownPosition && isActive) {
+          setCurrentCoordinate(toCoordinate(lastKnownPosition.coords));
+        }
+
+        const position = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+
+        if (isActive) {
+          setCurrentCoordinate(toCoordinate(position.coords));
+        }
       }
 
-      const lastKnownPosition = await Location.getLastKnownPositionAsync();
+      loadCurrentLocation().catch(() => undefined);
 
-      if (lastKnownPosition && isMounted) {
-        setCurrentCoordinate(toCoordinate(lastKnownPosition.coords));
-      }
-
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-
-      if (isMounted) {
-        setCurrentCoordinate(toCoordinate(position.coords));
-      }
-    }
-
-    loadCurrentLocation().catch(() => undefined);
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+      return () => {
+        isActive = false;
+      };
+    }, []),
+  );
 
   useEffect(() => {
     if (
@@ -616,6 +626,7 @@ export function RideMap({
         compass
         logo={false}
         preferredFramesPerSecond={30}
+        onLongPress={onLongPress}
         onRegionWillChange={handleRegionWillChange}
         onDidFinishLoadingStyle={() => setLoadedMapStyle(mapStyleKey)}
       >

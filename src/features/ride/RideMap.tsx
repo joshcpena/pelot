@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { type ThemeColors, useThemeColors } from '../settings/settings';
 import type {
@@ -11,12 +11,14 @@ import type {
 export function RideMap({
   destinationOptions,
   isNavigating,
+  onLongPress,
   points,
   plannedRoute,
 }: {
   destinationOptions?: DestinationOption[];
   isNavigating?: boolean;
   onCancelNavigation?: () => void;
+  onLongPress?: () => void;
   points: RidePoint[];
   mapType?: RideSettings['mapType'];
   plannedRoute?: PlannedRoute | null;
@@ -26,7 +28,11 @@ export function RideMap({
   const styles = createStyles(colors);
 
   return (
-    <View style={styles.container}>
+    <Pressable
+      delayLongPress={550}
+      onLongPress={onLongPress}
+      style={styles.container}
+    >
       <Text style={styles.title}>Map preview</Text>
       <Text style={styles.copy}>
         Native route rendering is available on iOS and Android. {points.length}{' '}
@@ -44,7 +50,7 @@ export function RideMap({
           {destinationOptions.length} destination options found.
         </Text>
       ) : null}
-    </View>
+    </Pressable>
   );
 }
 
