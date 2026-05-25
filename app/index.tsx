@@ -1428,6 +1428,9 @@ export default function HomeScreen() {
                     settings={settings}
                     onAddCard={() => setMetricPickerCardId('new')}
                     onCancelNavigation={cancelNavigation}
+                    onLongPressEmpty={
+                      canStart ? enterDashboardEditMode : undefined
+                    }
                     onLongPressCard={
                       canStart ? enterDashboardEditMode : undefined
                     }
@@ -1467,6 +1470,9 @@ export default function HomeScreen() {
                       settings={settings}
                       onAddCard={() => setMetricPickerCardId('new')}
                       onCancelNavigation={cancelNavigation}
+                      onLongPressEmpty={
+                        canStart ? enterDashboardEditMode : undefined
+                      }
                       onLongPressCard={
                         canStart ? enterDashboardEditMode : undefined
                       }

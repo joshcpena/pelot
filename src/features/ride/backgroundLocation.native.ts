@@ -60,23 +60,22 @@ export async function startBackgroundRideRecording(settings: RideSettings) {
     await Location.stopLocationUpdatesAsync(BACKGROUND_RIDE_LOCATION_TASK);
   }
 
+  const isBestAccuracy = settings.gpsAccuracy === 'best';
+
   await Location.startLocationUpdatesAsync(BACKGROUND_RIDE_LOCATION_TASK, {
-    accuracy:
-      settings.gpsAccuracy === 'best'
-        ? Location.Accuracy.BestForNavigation
-        : Location.Accuracy.Balanced,
+    accuracy: isBestAccuracy
+      ? Location.Accuracy.BestForNavigation
+      : Location.Accuracy.Balanced,
     activityType: Location.ActivityType.Fitness,
-    deferredUpdatesDistance: settings.gpsAccuracy === 'best' ? 10 : 50,
-    deferredUpdatesInterval: settings.gpsAccuracy === 'best' ? 1000 : 30000,
-    distanceInterval: settings.gpsAccuracy === 'best' ? 5 : 25,
+    distanceInterval: isBestAccuracy ? 5 : 25,
     foregroundService: {
       notificationTitle: 'Pelot is recording your ride',
       notificationBody: 'Location is being used to keep tracking your route.',
       notificationColor: '#238636',
     },
-    pausesUpdatesAutomatically: settings.gpsAccuracy !== 'best',
+    pausesUpdatesAutomatically: false,
     showsBackgroundLocationIndicator: true,
-    timeInterval: settings.gpsAccuracy === 'best' ? 1000 : 10000,
+    timeInterval: isBestAccuracy ? 1000 : 10000,
   });
 
   return true;

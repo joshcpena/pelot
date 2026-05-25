@@ -13,6 +13,25 @@ const openRouteServiceProfiles: Record<RouteProfile, string> = {
 };
 const RECENT_ROUTE_DESTINATIONS_SETTING_KEY = 'recentRouteDestinations';
 export const MAX_RECENT_ROUTE_DESTINATIONS = 10;
+const MAPTILER_DESTINATION_TYPES = [
+  'continental_marine',
+  'country',
+  'major_landform',
+  'region',
+  'subregion',
+  'county',
+  'joint_municipality',
+  'joint_submunicipality',
+  'municipality',
+  'municipal_district',
+  'locality',
+  'neighbourhood',
+  'place',
+  'postal_code',
+  'address',
+  'road',
+  'poi',
+].join(',');
 
 type MapTilerGeocodingResponse = {
   features?: {
@@ -296,24 +315,19 @@ async function fetchMapTilerGeocodingResults({
   destination,
   mapTilerApiKey,
   origin,
-  types,
 }: {
   destination: string;
   mapTilerApiKey: string;
   origin: RouteCoordinate;
-  types?: string;
 }) {
   const url = new URL(
     `https://api.maptiler.com/geocoding/${encodeURIComponent(destination)}.json`,
   );
   url.searchParams.set('key', mapTilerApiKey);
-  url.searchParams.set('limit', '8');
+  url.searchParams.set('limit', '10');
   url.searchParams.set('proximity', `${origin.longitude},${origin.latitude}`);
   url.searchParams.set('bbox', getSearchBoundingBox(origin));
-
-  if (types) {
-    url.searchParams.set('types', types);
-  }
+  url.searchParams.set('types', MAPTILER_DESTINATION_TYPES);
 
   const response = await fetch(url.toString());
 
@@ -399,26 +413,19 @@ export async function searchBikeDestinations({
     return [];
   }
 
-  const [generalResults, poiResults] = await Promise.all([
-    fetchMapTilerGeocodingResults({ destination, mapTilerApiKey, origin }),
-    fetchMapTilerGeocodingResults({
-      destination,
-      mapTilerApiKey,
-      origin,
-      types: 'poi',
-    }),
-  ]);
-  const options = dedupeDestinationOptions([
-    ...toDestinationOptions(poiResults, destination),
-    ...toDestinationOptions(generalResults, destination),
-  ]).slice(0, 8);
+  const results = await fetchMapTilerGeocodingResults({
+    destination,
+    mapTilerApiKey,
+    origin,
+  });
+  const options = dedupeDestinationOptions(
+    toDestinationOptions(results, destination),
+  ).slice(0, 8);
 
   if (options.length === 0) {
     throw new Error(
-      generalResults.message ??
-        generalResults.error ??
-        poiResults.message ??
-        poiResults.error ??
+      results.message ??
+        results.error ??
         'MapTiler could not find that destination.',
     );
   }

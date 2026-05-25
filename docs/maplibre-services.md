@@ -11,18 +11,27 @@ EXPO_PUBLIC_MAPTILER_API_KEY=...
 EXPO_PUBLIC_OPENROUTESERVICE_API_KEY=...
 ```
 
-`EXPO_PUBLIC_MAPTILER_API_KEY` is used for MapTiler place search.
+`EXPO_PUBLIC_MAPTILER_API_KEY` is used for MapTiler place search. Each
+destination search sends one forward geocoding request that includes standard
+place/address types plus POIs.
 `EXPO_PUBLIC_OPENROUTESERVICE_API_KEY` is used for cycling routes and turn
 instructions.
 
-The app uses OpenFreeMap MapLibre style URLs for map display:
+The default map uses OpenFreeMap MapLibre style URLs for map display:
 
 ```sh
-https://tiles.openfreemap.org/styles/positron
-https://tiles.openfreemap.org/styles/dark
 https://tiles.openfreemap.org/styles/liberty
 https://tiles.openfreemap.org/styles/fiord
 ```
+
+The outdoor map uses bundled Maputnik styles in
+`assets/map-styles/outdoors-openfreemap.json` and
+`assets/map-styles/outdoors-dark-openfreemap.json`. The light style is adapted
+from the Stadia outdoors style to use OpenFreeMap's vector source, glyphs, and
+sprite at runtime. The dark style keeps the same outdoor layer structure with a
+Fiord-inspired palette. Stadia font names are rewritten to
+OpenFreeMap-supported Noto Sans fonts, and unsupported `piste` layers are
+omitted.
 
 OpenFreeMap does not provide satellite imagery, so Pelot currently exposes
 standard and outdoor map styles only. Place search and route planning still

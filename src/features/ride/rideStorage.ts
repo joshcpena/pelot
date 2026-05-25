@@ -21,6 +21,7 @@ type RidePointRow = {
   heading: number | null;
   horizontal_accuracy: number | null;
   vertical_accuracy: number | null;
+  source: RidePointSource;
 };
 
 type RidePointSource = 'foreground-gps' | 'background-gps';
@@ -49,6 +50,27 @@ function toRidePoint(row: RidePointRow): RidePoint {
     horizontalAccuracy: row.horizontal_accuracy,
     verticalAccuracy: row.vertical_accuracy,
   };
+}
+
+function getRidePointRowKey(row: RidePointRow) {
+  return [row.recorded_at, row.latitude, row.longitude].join(':');
+}
+
+function dedupeRidePointRows(rows: RidePointRow[]) {
+  const rowsByKey = new Map<string, RidePointRow>();
+
+  for (const row of rows) {
+    const key = getRidePointRowKey(row);
+    const existingRow = rowsByKey.get(key);
+
+    if (!existingRow || row.source === 'foreground-gps') {
+      rowsByKey.set(key, row);
+    }
+  }
+
+  return [...rowsByKey.values()].sort(
+    (first, second) => first.recorded_at - second.recorded_at,
+  );
 }
 
 export type RideSummary = {
@@ -207,14 +229,15 @@ export async function loadRidePoints(rideId: string) {
             speed_mps,
             heading,
             horizontal_accuracy,
-            vertical_accuracy
+            vertical_accuracy,
+            source
      FROM ride_points
      WHERE ride_id = ?
      ORDER BY recorded_at ASC`,
     rideId,
   );
 
-  return rows.map(toRidePoint);
+  return dedupeRidePointRows(rows).map(toRidePoint);
 }
 
 export async function loadRidePointsAfter(rideId: string, recordedAt: number) {
@@ -227,7 +250,8 @@ export async function loadRidePointsAfter(rideId: string, recordedAt: number) {
             speed_mps,
             heading,
             horizontal_accuracy,
-            vertical_accuracy
+            vertical_accuracy,
+            source
      FROM ride_points
      WHERE ride_id = ? AND recorded_at > ?
      ORDER BY recorded_at ASC`,
@@ -235,7 +259,7 @@ export async function loadRidePointsAfter(rideId: string, recordedAt: number) {
     recordedAt,
   );
 
-  return rows.map(toRidePoint);
+  return dedupeRidePointRows(rows).map(toRidePoint);
 }
 
 export async function deleteRide(rideId: string) {

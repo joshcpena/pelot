@@ -14,6 +14,7 @@ import {
 
 import type { ThemeColors } from '../settings/settings';
 import {
+  DASHBOARD_MAX_ROWS,
   dashboardMetricById,
   getDashboardSpanDimensions,
   type DashboardValueContext,
@@ -58,6 +59,7 @@ export function DashboardGrid({
   rowHeight = 66,
   canAddCard = true,
   onLongPressCard,
+  onLongPressEmpty,
   isEditing = false,
   onAddCard,
   onCancelNavigation,
@@ -72,6 +74,7 @@ export function DashboardGrid({
   rowHeight?: number;
   canAddCard?: boolean;
   onLongPressCard?: (card: DashboardCard) => void;
+  onLongPressEmpty?: () => void;
   isEditing?: boolean;
   onAddCard?: () => void;
   onCancelNavigation?: () => void;
@@ -288,8 +291,23 @@ export function DashboardGrid({
     );
   });
 
+  const gridHeight = rowHeight * DASHBOARD_MAX_ROWS;
+  const emptySpaceLongPressHandler = !isEditing ? onLongPressEmpty : undefined;
+
   const grid = (
-    <View style={styles.grid}>
+    <View
+      style={[
+        styles.grid,
+        emptySpaceLongPressHandler ? { minHeight: gridHeight } : null,
+      ]}
+    >
+      {emptySpaceLongPressHandler ? (
+        <DashboardEmptySpaceEditTarget
+          onLongPress={emptySpaceLongPressHandler}
+          showLabel={layout.length === 0}
+          styles={styles}
+        />
+      ) : null}
       {cards}
       {isEditing && canAddCard ? (
         <Pressable
@@ -601,6 +619,83 @@ function EditDashboardCard({
   );
 }
 
+function DashboardEmptySpaceEditTarget({
+  onLongPress,
+  showLabel,
+  styles,
+}: {
+  onLongPress: () => void;
+  showLabel: boolean;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  const [holdFeedback] = useState(() => new Animated.Value(0));
+
+  function resetHoldFeedback() {
+    holdFeedback.stopAnimation();
+    Animated.timing(holdFeedback, {
+      toValue: 0,
+      duration: 90,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }
+
+  function startHoldFeedback() {
+    holdFeedback.stopAnimation();
+    holdFeedback.setValue(0);
+    Animated.timing(holdFeedback, {
+      toValue: 1,
+      duration: ENTER_EDIT_DELAY_MS,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }
+
+  return (
+    <Animated.View
+      style={[
+        styles.emptyDashboardTarget,
+        {
+          transform: [
+            {
+              scale: holdFeedback.interpolate({
+                inputRange: [0, 1],
+                outputRange: [1, 0.985],
+              }),
+            },
+          ],
+        },
+      ]}
+    >
+      <Pressable
+        accessibilityHint="Press and hold to edit this dashboard screen."
+        accessibilityLabel="Empty dashboard screen"
+        delayLongPress={ENTER_EDIT_DELAY_MS}
+        onLongPress={onLongPress}
+        onPressIn={startHoldFeedback}
+        onPressOut={resetHoldFeedback}
+        style={styles.emptyDashboardPressable}
+      >
+        {showLabel ? (
+          <Text style={styles.emptyDashboardText}>No metrics</Text>
+        ) : null}
+      </Pressable>
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.emptyDashboardGlow,
+          {
+            opacity: holdFeedback.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 0.16],
+            }),
+          },
+        ]}
+      />
+    </Animated.View>
+  );
+}
+
 function MetricCardContent({
   colors,
   columns,
@@ -667,10 +762,14 @@ function createStyles(colors: ThemeColors) {
       flexWrap: 'wrap',
     },
     cardShell: {
+      position: 'relative',
+      zIndex: 1,
       overflow: 'hidden',
       backgroundColor: colors.card,
     },
     holdCard: {
+      position: 'relative',
+      zIndex: 1,
       overflow: 'hidden',
       backgroundColor: colors.card,
     },
@@ -791,6 +890,42 @@ function createStyles(colors: ThemeColors) {
       fontSize: 10,
       fontWeight: '900',
       letterSpacing: 0.5,
+      textTransform: 'uppercase',
+    },
+    emptyDashboardTarget: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      overflow: 'hidden',
+      backgroundColor: colors.background,
+    },
+    emptyDashboardPressable: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      padding: 16,
+    },
+    emptyDashboardGlow: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      borderWidth: 2,
+      borderColor: colors.accent,
+      backgroundColor: colors.accent,
+    },
+    emptyDashboardText: {
+      color: colors.mutedText,
+      fontSize: 12,
+      fontWeight: '900',
+      letterSpacing: 0.6,
+      textAlign: 'center',
       textTransform: 'uppercase',
     },
     metricLabel: {

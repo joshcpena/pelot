@@ -120,7 +120,7 @@ function getMapTypeLabel(mapType: RideSettings['mapType']) {
     case 'outdoor':
       return 'Outdoor';
     case 'standard':
-      return 'Map';
+      return 'Default';
   }
 }
 
@@ -680,7 +680,7 @@ export default function SettingsScreen() {
         <View style={styles.rowWrap}>
           <OptionButton
             styles={styles}
-            label="Map"
+            label="Default"
             value="standard"
             selectedValue={settings.mapType}
             onSelect={(value) => update('mapType', value)}

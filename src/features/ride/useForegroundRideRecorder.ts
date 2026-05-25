@@ -160,6 +160,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
     typeof setTimeout
   > | null>(null);
   const shouldSyncBeforeNextLocationRef = useRef(false);
+  const appStateTransitionIdRef = useRef(0);
 
   useEffect(() => {
     settingsRef.current = settings;
@@ -442,11 +443,16 @@ export function useForegroundRideRecorder(settings: RideSettings) {
       return true;
     }
 
-    const backgroundStarted = await startBackgroundRideRecording(
-      settingsRef.current,
-    );
-    isBackgroundRecordingRef.current = backgroundStarted;
-    return backgroundStarted;
+    try {
+      const backgroundStarted = await startBackgroundRideRecording(
+        settingsRef.current,
+      );
+      isBackgroundRecordingRef.current = backgroundStarted;
+      return backgroundStarted;
+    } catch {
+      isBackgroundRecordingRef.current = false;
+      return false;
+    }
   }
 
   async function stopBackgroundRecordingIfNeeded() {
@@ -541,19 +547,46 @@ export function useForegroundRideRecorder(settings: RideSettings) {
       return;
     }
 
+    const transitionId = appStateTransitionIdRef.current + 1;
+    appStateTransitionIdRef.current = transitionId;
+    const isCurrentTransition = () =>
+      appStateTransitionIdRef.current === transitionId &&
+      statusRef.current === 'recording';
+
     if (nextState === 'active') {
-      await stopBackgroundRecordingIfNeeded();
       shouldSyncBeforeNextLocationRef.current = true;
       await syncPersistedRidePoints();
-      scheduleResumePointSync();
+      if (!isCurrentTransition()) {
+        return;
+      }
       await startWatchingLocation();
+      if (!isCurrentTransition()) {
+        return;
+      }
+      await stopBackgroundRecordingIfNeeded();
+      await syncPersistedRidePoints();
+      if (!isCurrentTransition()) {
+        return;
+      }
+      scheduleResumePointSync();
       return;
     }
 
     clearResumePointSync();
     shouldSyncBeforeNextLocationRef.current = false;
+    const backgroundStarted = await startBackgroundRecordingIfNeeded();
+
+    if (!isCurrentTransition() || AppState.currentState === 'active') {
+      return;
+    }
+
     await stopWatchingLocation();
-    await startBackgroundRecordingIfNeeded();
+
+    if (!backgroundStarted) {
+      setError(
+        'Background location is not enabled, so the ride may not keep recording while Pelot is not open.',
+      );
+    }
   }
 
   useEffect(() => {
@@ -619,7 +652,9 @@ export function useForegroundRideRecorder(settings: RideSettings) {
     stopTimer();
     await stopWatchingLocation();
     stopWatchingBarometer();
+    await syncPersistedRidePoints();
     await stopBackgroundRecordingIfNeeded();
+    await syncPersistedRidePoints();
     clearResumePointSync();
     shouldSyncBeforeNextLocationRef.current = false;
     await deactivateKeepAwake(KEEP_AWAKE_TAG);
@@ -655,6 +690,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
     stopTimer();
     await stopWatchingLocation();
     stopWatchingBarometer();
+    await syncPersistedRidePoints();
     await stopBackgroundRecordingIfNeeded();
     await syncPersistedRidePoints();
     clearResumePointSync();
