@@ -11,7 +11,9 @@ import { useColorScheme } from 'react-native';
 import { getDatabase, initializeDatabase } from '../../lib/database';
 import {
   defaultDashboardLayout,
+  defaultDashboardScreens,
   validateDashboardLayout,
+  validateDashboardScreens,
 } from '../ride/dashboard';
 import type { RideSettings } from '../ride/types';
 
@@ -31,6 +33,7 @@ export const defaultRideSettings: RideSettings = {
   mapType: 'standard',
   routeProfile: 'bike',
   dashboardLayout: defaultDashboardLayout,
+  dashboardScreens: defaultDashboardScreens,
   connectedHeartRateDevice: null,
   riderWeightKg: null,
   riderHeightCm: null,
@@ -129,6 +132,10 @@ function decodeSetting<K extends SettingKey>(
       return validateDashboardLayout(decoded) as RideSettings[K];
     }
 
+    if (key === 'dashboardScreens') {
+      return validateDashboardScreens(decoded) as RideSettings[K];
+    }
+
     return decoded as RideSettings[K];
   } catch {
     return value as RideSettings[K];
@@ -142,12 +149,26 @@ export async function loadRideSettings() {
     'SELECT key, value FROM settings',
   );
   const settings = { ...defaultRideSettings };
+  let loadedDashboardLayout = false;
+  let loadedDashboardScreens = false;
 
   for (const row of rows) {
     if (row.key in settings) {
       const key = row.key as SettingKey;
+
+      loadedDashboardLayout =
+        loadedDashboardLayout || key === 'dashboardLayout';
+      loadedDashboardScreens =
+        loadedDashboardScreens || key === 'dashboardScreens';
+
       Object.assign(settings, { [key]: decodeSetting(key, row.value) });
     }
+  }
+
+  if (loadedDashboardLayout && !loadedDashboardScreens) {
+    settings.dashboardScreens = [
+      { id: defaultDashboardScreens[0].id, layout: settings.dashboardLayout },
+    ];
   }
 
   return settings;

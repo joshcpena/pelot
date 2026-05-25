@@ -9,6 +9,7 @@ import {
 } from './metrics';
 import type {
   DashboardCard,
+  DashboardScreen,
   DashboardCardSpan,
   DashboardMetricId,
   DestinationOption,
@@ -86,6 +87,47 @@ export const dashboardSpans: DashboardCardSpan[] = [
   '3x3',
   '3x4',
   '3x5',
+  '3x6',
+  '3x7',
+  '3x8',
+  '3x9',
+  '3x10',
+];
+
+export const metricDashboardSpans: DashboardCardSpan[] = [
+  '1x1',
+  '1x2',
+  '1x3',
+  '1x4',
+  '1x5',
+  '1.5x1',
+  '1.5x2',
+  '1.5x3',
+  '1.5x4',
+  '1.5x5',
+  '2x1',
+  '2x2',
+  '2x3',
+  '2x4',
+  '2x5',
+  '3x1',
+  '3x2',
+  '3x3',
+  '3x4',
+  '3x5',
+];
+
+export const mapDashboardSpans: DashboardCardSpan[] = [
+  '3x1',
+  '3x2',
+  '3x3',
+  '3x4',
+  '3x5',
+  '3x6',
+  '3x7',
+  '3x8',
+  '3x9',
+  '3x10',
 ];
 
 export function getDashboardSpanDimensions(span: DashboardCardSpan) {
@@ -139,8 +181,11 @@ export const defaultDashboardLayout: DashboardCard[] = [
   { id: 'card-calories-total', metricId: 'caloriesTotal', span: '1.5x1' },
 ];
 
-const allSpans = dashboardSpans;
-const metricSpans = dashboardSpans;
+export const defaultDashboardScreens: DashboardScreen[] = [
+  { id: 'screen-main', layout: defaultDashboardLayout },
+];
+
+const metricSpans = metricDashboardSpans;
 const ELEVATION_CHANGE_THRESHOLD_METERS = 3;
 const KPH_TO_MPH = 0.621371;
 
@@ -713,7 +758,7 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
     id: 'map',
     label: 'Map',
     category: 'Maps & Navigation',
-    supportedSpans: allSpans,
+    supportedSpans: mapDashboardSpans,
     defaultSpan: '3x3',
     getValue: () => '',
   },
@@ -1165,6 +1210,15 @@ export function createDashboardCard(
   };
 }
 
+export function createDashboardScreen(
+  layout: DashboardCard[] = [],
+): DashboardScreen {
+  return {
+    id: `screen-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    layout: getFittingDashboardLayout(layout),
+  };
+}
+
 export function canAddDashboardMetric(
   layout: DashboardCard[],
   metricId: DashboardMetricId,
@@ -1185,9 +1239,12 @@ export function canAddDashboardMetric(
   ]);
 }
 
-export function validateDashboardLayout(value: unknown): DashboardCard[] {
+export function validateDashboardLayout(
+  value: unknown,
+  fallback: DashboardCard[] = defaultDashboardLayout,
+): DashboardCard[] {
   if (!Array.isArray(value)) {
-    return defaultDashboardLayout;
+    return fallback;
   }
 
   const validCards = value
@@ -1207,12 +1264,18 @@ export function validateDashboardLayout(value: unknown): DashboardCard[] {
         '1.5x',
       ) as DashboardCardSpan;
 
-      return (
-        typeof candidate.id === 'string' &&
-        typeof candidate.metricId === 'string' &&
-        dashboardMetricById.has(candidate.metricId as DashboardMetricId) &&
-        dashboardSpans.includes(normalizedSpan)
+      if (
+        typeof candidate.id !== 'string' ||
+        typeof candidate.metricId !== 'string'
+      ) {
+        return false;
+      }
+
+      const metric = dashboardMetricById.get(
+        candidate.metricId as DashboardMetricId,
       );
+
+      return metric ? metric.supportedSpans.includes(normalizedSpan) : false;
     })
     .map((card) => ({
       ...card,
@@ -1220,5 +1283,30 @@ export function validateDashboardLayout(value: unknown): DashboardCard[] {
     }));
   const fittingCards = getFittingDashboardLayout(validCards);
 
-  return fittingCards.length > 0 ? fittingCards : defaultDashboardLayout;
+  return fittingCards.length > 0 ? fittingCards : fallback;
+}
+
+export function validateDashboardScreens(value: unknown): DashboardScreen[] {
+  if (!Array.isArray(value)) {
+    return defaultDashboardScreens;
+  }
+
+  const validScreens = value
+    .filter((screen): screen is DashboardScreen => {
+      if (!screen || typeof screen !== 'object') {
+        return false;
+      }
+
+      const candidate = screen as Partial<DashboardScreen>;
+
+      return (
+        typeof candidate.id === 'string' && Array.isArray(candidate.layout)
+      );
+    })
+    .map((screen) => ({
+      id: screen.id,
+      layout: validateDashboardLayout(screen.layout, []),
+    }));
+
+  return validScreens.length > 0 ? validScreens : defaultDashboardScreens;
 }

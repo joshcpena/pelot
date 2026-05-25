@@ -71,7 +71,12 @@ export type DashboardCardSpan =
   | '3x2'
   | '3x3'
   | '3x4'
-  | '3x5';
+  | '3x5'
+  | '3x6'
+  | '3x7'
+  | '3x8'
+  | '3x9'
+  | '3x10';
 
 export type DashboardMetricId =
   | 'caloriesTotal'
@@ -142,6 +147,11 @@ export type DashboardCard = {
   span: DashboardCardSpan;
 };
 
+export type DashboardScreen = {
+  id: string;
+  layout: DashboardCard[];
+};
+
 export type RouteCoordinate = {
   latitude: number;
   longitude: number;
@@ -185,6 +195,7 @@ export type RideSettings = {
   mapType: 'standard' | 'outdoor' | 'satellite' | 'hybrid';
   routeProfile: RouteProfile;
   dashboardLayout: DashboardCard[];
+  dashboardScreens: DashboardScreen[];
   connectedHeartRateDevice: HeartRateDevice | null;
   riderWeightKg: number | null;
   riderHeightCm: number | null;

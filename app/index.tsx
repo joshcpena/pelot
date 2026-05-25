@@ -9,12 +9,14 @@ import {
   Easing,
   Keyboard,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
@@ -27,11 +29,13 @@ import {
   DASHBOARD_MAX_ROWS,
   canAddDashboardMetric,
   createDashboardCard,
+  createDashboardScreen,
   dashboardLayoutFits,
   dashboardMetricById,
   dashboardMetricCatalog,
   dashboardSpans,
   getDashboardLayoutRows,
+  getDashboardSpanDimensions,
   type DashboardMetricCategory,
 } from '../src/features/ride/dashboard';
 import { DashboardGrid } from '../src/features/ride/DashboardGrid';
@@ -43,6 +47,7 @@ import type {
   DashboardCard,
   DashboardCardSpan,
   DashboardMetricId,
+  DashboardScreen,
   DestinationOption,
   PlannedRoute,
   RouteCoordinate,
@@ -95,6 +100,8 @@ const REROUTE_COOLDOWN_MS = 30_000;
 const AUTO_DIM_DELAY_MS = 30_000;
 const AUTO_DIM_BRIGHTNESS = 0.08;
 const STOP_HOLD_MS = 1000;
+const DASHBOARD_SWIPE_START_PX = 24;
+const DASHBOARD_SWIPE_RELEASE_PX = 58;
 const clockMetricIds = new Set<DashboardMetricId>([
   'timeOfDay',
   'sunrise',
@@ -188,6 +195,17 @@ function distanceToRouteMeters(
   return bestDistance;
 }
 
+function clampDashboardScreenIndex(index: number, screenCount: number) {
+  return Math.min(Math.max(index, 0), Math.max(screenCount - 1, 0));
+}
+
+function isDashboardScreenSwipe(dx: number, dy: number) {
+  const absoluteX = Math.abs(dx);
+  const absoluteY = Math.abs(dy);
+
+  return absoluteX > DASHBOARD_SWIPE_START_PX && absoluteX > absoluteY * 1.35;
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   const {
@@ -198,6 +216,8 @@ export default function HomeScreen() {
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
   const styles = createStyles(colors);
+  const { width: windowWidth } = useWindowDimensions();
+  const dashboardPageWidth = Math.max(windowWidth, 1);
   const recorder = useForegroundRideRecorder(settings);
   const lastRouteOriginRef = useRef<RouteCoordinate | null>(null);
   const rerouteInFlightRef = useRef(false);
@@ -226,7 +246,16 @@ export default function HomeScreen() {
   const [now, setNow] = useState<number | null>(null);
   const [stopFill] = useState(() => new Animated.Value(0));
   const [isEditingDashboard, setIsEditingDashboard] = useState(false);
-  const [layoutDraft, setLayoutDraft] = useState(settings.dashboardLayout);
+  const [dashboardScreenDrafts, setDashboardScreenDrafts] = useState<
+    DashboardScreen[]
+  >(settings.dashboardScreens);
+  const [activeDashboardScreenIndex, setActiveDashboardScreenIndex] =
+    useState(0);
+  const [dashboardSlide] = useState(() => new Animated.Value(0));
+  const [dashboardSwipeTargetIndex, setDashboardSwipeTargetIndex] = useState<
+    number | null
+  >(null);
+  const [dashboardSwipeDirection, setDashboardSwipeDirection] = useState(0);
   const [dashboardHeight, setDashboardHeight] = useState(0);
   const [welcomeStep, setWelcomeStep] = useState(0);
   const [isPromptingWelcomePermissions, setIsPromptingWelcomePermissions] =
@@ -238,17 +267,32 @@ export default function HomeScreen() {
     null,
   );
   const [sizePickerCardId, setSizePickerCardId] = useState<string | null>(null);
+  const dashboardScreenCountRef = useRef(settings.dashboardScreens.length);
+  const dashboardSwipeTargetIndexRef = useRef<number | null>(null);
+  const dashboardSwipeDirectionRef = useRef(0);
+  const dashboardWidthRef = useRef(dashboardPageWidth);
+  const isEditingDashboardRef = useRef(false);
+  const visibleDashboardScreenIndexRef = useRef(0);
   const isRecording = recorder.status === 'recording';
   const isPaused = recorder.status === 'paused';
   const canStart = recorder.status === 'idle' || recorder.status === 'stopped';
   const dashboardRowHeight = dashboardHeight > 0 ? dashboardHeight / 10 : 66;
-  const displayedLayout = isEditingDashboard
-    ? layoutDraft
-    : settings.dashboardLayout;
-  const layoutDraftRows = getDashboardLayoutRows(layoutDraft);
-  const layoutDraftFits = dashboardLayoutFits(layoutDraft);
+  const displayedDashboardScreens = isEditingDashboard
+    ? dashboardScreenDrafts
+    : settings.dashboardScreens;
+  const dashboardScreenCount = displayedDashboardScreens.length;
+  const visibleDashboardScreenIndex = clampDashboardScreenIndex(
+    activeDashboardScreenIndex,
+    dashboardScreenCount,
+  );
+  const activeDashboardScreen =
+    displayedDashboardScreens[visibleDashboardScreenIndex] ??
+    displayedDashboardScreens[0];
+  const displayedLayout = activeDashboardScreen?.layout ?? [];
+  const layoutDraftRows = getDashboardLayoutRows(displayedLayout);
+  const layoutDraftFits = dashboardLayoutFits(displayedLayout);
   const canAddDashboardCard = dashboardMetricCatalog.some((metric) =>
-    canAddDashboardMetric(layoutDraft, metric.id),
+    canAddDashboardMetric(displayedLayout, metric.id),
   );
   const shouldConnectHeartRate = displayedLayout.some(
     (card) => card.metricId === 'heartRateCurrent',
@@ -272,6 +316,80 @@ export default function HomeScreen() {
     recorder.status,
     shouldCollectWeather,
   );
+  const dashboardSwipeTargetScreen =
+    dashboardSwipeTargetIndex == null
+      ? null
+      : displayedDashboardScreens[dashboardSwipeTargetIndex];
+  const dashboardTargetTranslateX =
+    dashboardSwipeDirection === 0
+      ? dashboardSlide
+      : dashboardSlide.interpolate({
+          inputRange: [-dashboardPageWidth, 0, dashboardPageWidth],
+          outputRange: [
+            dashboardSwipeDirection * dashboardPageWidth - dashboardPageWidth,
+            dashboardSwipeDirection * dashboardPageWidth,
+            dashboardSwipeDirection * dashboardPageWidth + dashboardPageWidth,
+          ],
+        });
+  const dashboardContext = {
+    metrics: recorder.metrics,
+    settings,
+    routePoints: recorder.routePoints,
+    plannedRoute,
+    destinationOptions,
+    isNavigating: recorder.status === 'recording' && plannedRoute != null,
+    now,
+    heartRateBpm: heartRate.heartRateBpm,
+    heartRateStatus: heartRate.status,
+    heartRateError: heartRate.error,
+    deviceBatteryLevel,
+    currentWeather: weather.currentWeather,
+    weatherSamples: weather.weatherSamples,
+  };
+  const [dashboardSwipeResponder] = useState(() =>
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gesture) =>
+        !isEditingDashboardRef.current &&
+        dashboardScreenCountRef.current > 1 &&
+        isDashboardScreenSwipe(gesture.dx, gesture.dy),
+      onPanResponderGrant: () => {
+        dashboardSlide.stopAnimation();
+        dashboardSlide.setValue(0);
+        updateDashboardSwipeTarget(null);
+      },
+      onPanResponderMove: (_, gesture) => {
+        updateDashboardSwipeDrag(gesture.dx);
+      },
+      onPanResponderRelease: (_, gesture) => {
+        const shouldChangeScreen =
+          Math.abs(gesture.dx) > DASHBOARD_SWIPE_RELEASE_PX ||
+          Math.abs(gesture.vx) > 0.45;
+        const currentIndex = visibleDashboardScreenIndexRef.current;
+        const targetIndex = getDashboardSwipeTargetIndex(gesture.dx);
+
+        if (!shouldChangeScreen || targetIndex === currentIndex) {
+          animateDashboardSwipeReset();
+          return;
+        }
+
+        animateDashboardScreenChange(targetIndex);
+      },
+      onPanResponderTerminate: () => animateDashboardSwipeReset(),
+      onPanResponderTerminationRequest: () => true,
+    }),
+  );
+
+  useEffect(() => {
+    dashboardScreenCountRef.current = dashboardScreenCount;
+    dashboardWidthRef.current = dashboardPageWidth;
+    isEditingDashboardRef.current = isEditingDashboard;
+    visibleDashboardScreenIndexRef.current = visibleDashboardScreenIndex;
+  }, [
+    dashboardPageWidth,
+    dashboardScreenCount,
+    isEditingDashboard,
+    visibleDashboardScreenIndex,
+  ]);
 
   useEffect(() => {
     if (!shouldRunClock) {
@@ -471,8 +589,103 @@ export default function HomeScreen() {
     settings.routeProfile,
   ]);
 
+  function updateDashboardSwipeTarget(
+    nextIndex: number | null,
+    nextDirection = 0,
+  ) {
+    if (dashboardSwipeTargetIndexRef.current !== nextIndex) {
+      dashboardSwipeTargetIndexRef.current = nextIndex;
+      setDashboardSwipeTargetIndex(nextIndex);
+    }
+
+    if (dashboardSwipeDirectionRef.current !== nextDirection) {
+      dashboardSwipeDirectionRef.current = nextDirection;
+      setDashboardSwipeDirection(nextDirection);
+    }
+  }
+
+  function getDashboardSwipeTargetIndex(dx: number) {
+    const currentIndex = visibleDashboardScreenIndexRef.current;
+
+    if (Math.abs(dx) < 1) {
+      return currentIndex;
+    }
+
+    return clampDashboardScreenIndex(
+      currentIndex + (dx < 0 ? 1 : -1),
+      dashboardScreenCountRef.current,
+    );
+  }
+
+  function updateDashboardSwipeDrag(dx: number) {
+    const targetIndex = getDashboardSwipeTargetIndex(dx);
+    const currentIndex = visibleDashboardScreenIndexRef.current;
+    const width = dashboardWidthRef.current;
+    const direction = Math.sign(targetIndex - currentIndex);
+
+    if (targetIndex === currentIndex) {
+      updateDashboardSwipeTarget(null);
+      dashboardSlide.setValue(dx * 0.18);
+      return;
+    }
+
+    updateDashboardSwipeTarget(targetIndex, direction);
+    dashboardSlide.setValue(Math.max(-width, Math.min(width, dx)));
+  }
+
+  function animateDashboardSwipeReset() {
+    dashboardSlide.stopAnimation();
+    Animated.timing(dashboardSlide, {
+      toValue: 0,
+      duration: 160,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: Platform.OS !== 'web',
+    }).start(({ finished }) => {
+      if (finished) {
+        updateDashboardSwipeTarget(null);
+      }
+    });
+  }
+
+  function animateDashboardScreenChange(targetIndex: number) {
+    const currentIndex = visibleDashboardScreenIndexRef.current;
+    const direction = Math.sign(targetIndex - currentIndex);
+
+    if (direction === 0) {
+      animateDashboardSwipeReset();
+      return;
+    }
+
+    updateDashboardSwipeTarget(targetIndex, direction);
+    dashboardSlide.stopAnimation();
+    Animated.timing(dashboardSlide, {
+      toValue: -direction * dashboardWidthRef.current,
+      duration: 180,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: Platform.OS !== 'web',
+    }).start(({ finished }) => {
+      if (!finished) {
+        return;
+      }
+
+      setActiveDashboardScreenIndex(targetIndex);
+      visibleDashboardScreenIndexRef.current = targetIndex;
+
+      requestAnimationFrame(() => {
+        dashboardSlide.setValue(0);
+        updateDashboardSwipeTarget(null);
+      });
+    });
+  }
+
   function setDashboardLayoutDraft(nextLayout: DashboardCard[]) {
-    setLayoutDraft(nextLayout);
+    setDashboardScreenDrafts((currentScreens) =>
+      currentScreens.map((screen, index) =>
+        index === visibleDashboardScreenIndex
+          ? { ...screen, layout: nextLayout }
+          : screen,
+      ),
+    );
   }
 
   function saveDashboardLayout() {
@@ -480,20 +693,57 @@ export default function HomeScreen() {
       return;
     }
 
-    updateSetting('dashboardLayout', layoutDraft).catch(() => {});
+    updateSetting('dashboardScreens', dashboardScreenDrafts).catch(() => {});
+    updateSetting(
+      'dashboardLayout',
+      dashboardScreenDrafts[0]?.layout ?? [],
+    ).catch(() => {});
     setIsEditingDashboard(false);
+  }
+
+  function addDashboardScreen() {
+    const nextScreens = [...dashboardScreenDrafts, createDashboardScreen()];
+
+    setDashboardScreenDrafts(nextScreens);
+    setActiveDashboardScreenIndex(nextScreens.length - 1);
+  }
+
+  function removeActiveDashboardScreen() {
+    if (dashboardScreenDrafts.length <= 1) {
+      return;
+    }
+
+    const nextScreens = dashboardScreenDrafts.filter(
+      (_, index) => index !== visibleDashboardScreenIndex,
+    );
+
+    setDashboardScreenDrafts(nextScreens);
+    setActiveDashboardScreenIndex((currentIndex) =>
+      clampDashboardScreenIndex(currentIndex, nextScreens.length),
+    );
+  }
+
+  function moveDashboardScreen(direction: -1 | 1) {
+    const targetIndex = clampDashboardScreenIndex(
+      visibleDashboardScreenIndex + direction,
+      dashboardScreenCount,
+    );
+
+    animateDashboardScreenChange(targetIndex);
   }
 
   function updateDashboardCard(cardId: string, patch: Partial<DashboardCard>) {
     setDashboardLayoutDraft(
-      layoutDraft.map((card) =>
+      displayedLayout.map((card) =>
         card.id === cardId ? { ...card, ...patch } : card,
       ),
     );
   }
 
   function removeDashboardCard(cardId: string) {
-    setDashboardLayoutDraft(layoutDraft.filter((card) => card.id !== cardId));
+    setDashboardLayoutDraft(
+      displayedLayout.filter((card) => card.id !== cardId),
+    );
   }
 
   function moveDashboardCard(draggedCardId: string, targetCardId: string) {
@@ -501,14 +751,14 @@ export default function HomeScreen() {
       return;
     }
 
-    const from = layoutDraft.findIndex((card) => card.id === draggedCardId);
-    const to = layoutDraft.findIndex((card) => card.id === targetCardId);
+    const from = displayedLayout.findIndex((card) => card.id === draggedCardId);
+    const to = displayedLayout.findIndex((card) => card.id === targetCardId);
 
     if (from < 0 || to < 0) {
       return;
     }
 
-    const next = [...layoutDraft];
+    const next = [...displayedLayout];
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
 
@@ -519,7 +769,7 @@ export default function HomeScreen() {
 
   function chooseDashboardMetric(metricId: DashboardMetricId) {
     if (metricPickerCardId === 'new') {
-      const nextLayout = [...layoutDraft, createDashboardCard(metricId)];
+      const nextLayout = [...displayedLayout, createDashboardCard(metricId)];
 
       if (dashboardLayoutFits(nextLayout)) {
         setDashboardLayoutDraft(nextLayout);
@@ -533,7 +783,7 @@ export default function HomeScreen() {
 
   function chooseDashboardSpan(span: DashboardCardSpan) {
     if (sizePickerCardId) {
-      const nextLayout = layoutDraft.map((card) =>
+      const nextLayout = displayedLayout.map((card) =>
         card.id === sizePickerCardId ? { ...card, span } : card,
       );
 
@@ -547,7 +797,7 @@ export default function HomeScreen() {
 
   function enterDashboardEditMode() {
     if (canStart) {
-      setLayoutDraft(settings.dashboardLayout);
+      setDashboardScreenDrafts(settings.dashboardScreens);
       setIsEditingDashboard(true);
     }
   }
@@ -988,18 +1238,39 @@ export default function HomeScreen() {
   return (
     <>
       <View style={styles.container} onTouchStart={handleRideScreenTouch}>
-        <Pressable
-          accessibilityLabel="Open menu"
-          style={({ pressed }) => [
-            styles.menuButton,
-            pressed && styles.menuButtonPressed,
-          ]}
-          onPress={openNavigationPanel}
-        >
-          <View style={styles.menuLine} />
-          <View style={styles.menuLine} />
-          <View style={styles.menuLine} />
-        </Pressable>
+        {!isEditingDashboard ? (
+          <Pressable
+            accessibilityLabel="Open menu"
+            style={({ pressed }) => [
+              styles.menuButton,
+              pressed && styles.menuButtonPressed,
+            ]}
+            onPress={openNavigationPanel}
+          >
+            <View style={styles.menuLine} />
+            <View style={styles.menuLine} />
+            <View style={styles.menuLine} />
+          </Pressable>
+        ) : null}
+
+        {isEditingDashboard ? (
+          <View
+            pointerEvents="none"
+            style={[
+              styles.editModeStatusAnchor,
+              { top: Math.max(insets.top + 4, 12) },
+            ]}
+          >
+            <View style={styles.editModeStatus}>
+              <Text style={styles.editModeStatusTitle}>
+                Screen {visibleDashboardScreenIndex + 1}/{dashboardScreenCount}
+              </Text>
+              <Text style={styles.editModeStatusDetail}>
+                {layoutDraftRows}/{DASHBOARD_MAX_ROWS} rows used
+              </Text>
+            </View>
+          </View>
+        ) : null}
 
         <View
           style={[styles.dashboardArea, { paddingTop: insets.top }]}
@@ -1007,38 +1278,96 @@ export default function HomeScreen() {
             setDashboardHeight(event.nativeEvent.layout.height - insets.top);
           }}
         >
-          <ScrollView style={styles.dashboardScroller} scrollEnabled={false}>
-            <DashboardGrid
-              canAddCard={canAddDashboardCard}
-              colors={colors}
-              context={{
-                metrics: recorder.metrics,
-                settings,
-                routePoints: recorder.routePoints,
-                plannedRoute,
-                destinationOptions,
-                isNavigating:
-                  recorder.status === 'recording' && plannedRoute != null,
-                now,
-                heartRateBpm: heartRate.heartRateBpm,
-                heartRateStatus: heartRate.status,
-                heartRateError: heartRate.error,
-                deviceBatteryLevel,
-                currentWeather: weather.currentWeather,
-                weatherSamples: weather.weatherSamples,
-              }}
-              isEditing={isEditingDashboard}
-              layout={displayedLayout}
-              rowHeight={dashboardRowHeight}
-              settings={settings}
-              onAddCard={() => setMetricPickerCardId('new')}
-              onCancelNavigation={cancelNavigation}
-              onLongPressCard={canStart ? enterDashboardEditMode : undefined}
-              onMoveCard={moveDashboardCard}
-              onPressCard={(card) => setSizePickerCardId(card.id)}
-              onRemoveCard={removeDashboardCard}
-            />
-          </ScrollView>
+          <View
+            {...dashboardSwipeResponder.panHandlers}
+            style={styles.dashboardPager}
+          >
+            <View style={styles.dashboardSlideViewport}>
+              <Animated.View
+                style={[
+                  styles.dashboardSlidePage,
+                  { transform: [{ translateX: dashboardSlide }] },
+                ]}
+              >
+                <ScrollView
+                  style={styles.dashboardScroller}
+                  scrollEnabled={false}
+                >
+                  <DashboardGrid
+                    canAddCard={canAddDashboardCard}
+                    colors={colors}
+                    context={dashboardContext}
+                    isEditing={isEditingDashboard}
+                    layout={displayedLayout}
+                    rowHeight={dashboardRowHeight}
+                    settings={settings}
+                    onAddCard={() => setMetricPickerCardId('new')}
+                    onCancelNavigation={cancelNavigation}
+                    onLongPressCard={
+                      canStart ? enterDashboardEditMode : undefined
+                    }
+                    onMoveCard={moveDashboardCard}
+                    onPressCard={(card) => setSizePickerCardId(card.id)}
+                    onRemoveCard={removeDashboardCard}
+                  />
+                </ScrollView>
+              </Animated.View>
+              {dashboardSwipeTargetScreen ? (
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    styles.dashboardSlidePage,
+                    styles.dashboardSlidePageOverlay,
+                    {
+                      transform: [{ translateX: dashboardTargetTranslateX }],
+                    },
+                  ]}
+                >
+                  <ScrollView
+                    style={styles.dashboardScroller}
+                    scrollEnabled={false}
+                  >
+                    <DashboardGrid
+                      canAddCard={dashboardMetricCatalog.some((metric) =>
+                        canAddDashboardMetric(
+                          dashboardSwipeTargetScreen.layout,
+                          metric.id,
+                        ),
+                      )}
+                      colors={colors}
+                      context={dashboardContext}
+                      isEditing={isEditingDashboard}
+                      layout={dashboardSwipeTargetScreen.layout}
+                      rowHeight={dashboardRowHeight}
+                      settings={settings}
+                      onAddCard={() => setMetricPickerCardId('new')}
+                      onCancelNavigation={cancelNavigation}
+                      onLongPressCard={
+                        canStart ? enterDashboardEditMode : undefined
+                      }
+                      onMoveCard={moveDashboardCard}
+                      onPressCard={(card) => setSizePickerCardId(card.id)}
+                      onRemoveCard={removeDashboardCard}
+                    />
+                  </ScrollView>
+                </Animated.View>
+              ) : null}
+            </View>
+            {dashboardScreenCount > 1 ? (
+              <View pointerEvents="none" style={styles.dashboardPageDots}>
+                {displayedDashboardScreens.map((screen, index) => (
+                  <View
+                    key={screen.id}
+                    style={[
+                      styles.dashboardPageDot,
+                      index === visibleDashboardScreenIndex &&
+                        styles.dashboardPageDotActive,
+                    ]}
+                  />
+                ))}
+              </View>
+            ) : null}
+          </View>
         </View>
 
         {recorder.isAutoPaused ? (
@@ -1066,28 +1395,141 @@ export default function HomeScreen() {
 
         {isEditingDashboard ? (
           <View style={styles.editModeControls}>
-            <Text style={styles.editModeText}>
-              {layoutDraftRows}/{DASHBOARD_MAX_ROWS} rows used
-            </Text>
+            <View style={styles.editModeScreenControls}>
+              {dashboardScreenCount > 1 ? (
+                <>
+                  <Pressable
+                    accessibilityLabel="Previous dashboard screen"
+                    disabled={visibleDashboardScreenIndex === 0}
+                    style={({ pressed }) => [
+                      styles.editModeButton,
+                      styles.editModeArrowButton,
+                      visibleDashboardScreenIndex === 0 &&
+                        styles.disabledButton,
+                      pressed &&
+                        visibleDashboardScreenIndex > 0 &&
+                        styles.subtleButtonPressed,
+                    ]}
+                    onPress={() => moveDashboardScreen(-1)}
+                  >
+                    <Text
+                      style={[
+                        styles.editModeButtonText,
+                        styles.editModeArrowText,
+                      ]}
+                    >
+                      ‹
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityLabel="Next dashboard screen"
+                    disabled={
+                      visibleDashboardScreenIndex >= dashboardScreenCount - 1
+                    }
+                    style={({ pressed }) => [
+                      styles.editModeButton,
+                      styles.editModeArrowButton,
+                      visibleDashboardScreenIndex >= dashboardScreenCount - 1 &&
+                        styles.disabledButton,
+                      pressed &&
+                        visibleDashboardScreenIndex <
+                          dashboardScreenCount - 1 &&
+                        styles.subtleButtonPressed,
+                    ]}
+                    onPress={() => moveDashboardScreen(1)}
+                  >
+                    <Text
+                      style={[
+                        styles.editModeButtonText,
+                        styles.editModeArrowText,
+                      ]}
+                    >
+                      ›
+                    </Text>
+                  </Pressable>
+                </>
+              ) : null}
+            </View>
+            {dashboardScreenDrafts.length > 1 ? (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.editModeButton,
+                  styles.editModeActionButton,
+                  styles.editModeRemoveButton,
+                  pressed && styles.dangerSoftButtonPressed,
+                ]}
+                onPress={removeActiveDashboardScreen}
+              >
+                <Text
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
+                  numberOfLines={1}
+                  style={styles.editModeRemoveButtonText}
+                >
+                  Remove
+                </Text>
+              </Pressable>
+            ) : null}
             <Pressable
               style={({ pressed }) => [
                 styles.editModeButton,
+                styles.editModeActionButton,
                 pressed && styles.subtleButtonPressed,
               ]}
-              onPress={() => setDashboardLayoutDraft(settings.dashboardLayout)}
+              onPress={addDashboardScreen}
             >
-              <Text style={styles.editModeButtonText}>Reset</Text>
+              <Text
+                adjustsFontSizeToFit
+                minimumFontScale={0.82}
+                numberOfLines={1}
+                style={styles.editModeButtonText}
+              >
+                Add screen
+              </Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [
+                styles.editModeButton,
+                styles.editModeActionButton,
+                pressed && styles.subtleButtonPressed,
+              ]}
+              onPress={() => {
+                setDashboardScreenDrafts(settings.dashboardScreens);
+                setActiveDashboardScreenIndex((currentIndex) =>
+                  clampDashboardScreenIndex(
+                    currentIndex,
+                    settings.dashboardScreens.length,
+                  ),
+                );
+              }}
+            >
+              <Text
+                adjustsFontSizeToFit
+                minimumFontScale={0.82}
+                numberOfLines={1}
+                style={styles.editModeButtonText}
+              >
+                Reset
+              </Text>
             </Pressable>
             <Pressable
               disabled={!layoutDraftFits}
               style={({ pressed }) => [
                 styles.editModeDoneButton,
+                styles.editModeActionButton,
                 !layoutDraftFits && styles.disabledButton,
                 pressed && layoutDraftFits && styles.primaryButtonPressed,
               ]}
               onPress={saveDashboardLayout}
             >
-              <Text style={styles.editModeDoneButtonText}>Done</Text>
+              <Text
+                adjustsFontSizeToFit
+                minimumFontScale={0.82}
+                numberOfLines={1}
+                style={styles.editModeDoneButtonText}
+              >
+                Done
+              </Text>
             </Pressable>
           </View>
         ) : (
@@ -1230,7 +1672,7 @@ export default function HomeScreen() {
         colors={colors}
         canSelectMetric={(metricId) =>
           metricPickerCardId !== 'new' ||
-          canAddDashboardMetric(layoutDraft, metricId)
+          canAddDashboardMetric(displayedLayout, metricId)
         }
         visible={metricPickerCardId != null}
         onClose={() => setMetricPickerCardId(null)}
@@ -1238,7 +1680,9 @@ export default function HomeScreen() {
       />
       <DashboardSizePickerModal
         colors={colors}
-        card={layoutDraft.find((card) => card.id === sizePickerCardId) ?? null}
+        card={
+          displayedLayout.find((card) => card.id === sizePickerCardId) ?? null
+        }
         visible={sizePickerCardId != null}
         onClose={() => setSizePickerCardId(null)}
         onChangeMetric={(cardId) => {
@@ -1248,7 +1692,7 @@ export default function HomeScreen() {
         canSelectSpan={(span) =>
           sizePickerCardId != null &&
           dashboardLayoutFits(
-            layoutDraft.map((card) =>
+            displayedLayout.map((card) =>
               card.id === sizePickerCardId ? { ...card, span } : card,
             ),
           )
@@ -1324,8 +1768,9 @@ export default function HomeScreen() {
                 <Text style={styles.modalTitle}>Edit your dashboard</Text>
                 <Text style={styles.modalCopy}>
                   Press and hold any metric tile to edit your ride dashboard.
-                  Drag and drop tiles to your desired location, add a new one,
-                  or tap a tile again to customize the metric and its size.
+                  Drag and drop tiles to your desired location, add metrics or
+                  screens, or tap a tile again to customize the metric and its
+                  size.
                 </Text>
                 <View style={styles.modalActions}>
                   <Pressable
@@ -1449,7 +1894,9 @@ function DashboardSizePickerModal({
   const styles = createStyles(colors);
   const metric = card ? dashboardMetricById.get(card.metricId) : null;
   const spans = metric?.supportedSpans ?? dashboardSpans;
-  const spanHeights = ['1', '2', '3', '4', '5'];
+  const spanHeights = Array.from(
+    new Set(spans.map((span) => getDashboardSpanDimensions(span).rows)),
+  ).sort((a, b) => a - b);
 
   return (
     <Modal
@@ -1473,7 +1920,10 @@ function DashboardSizePickerModal({
               <Text style={styles.navigationCloseText}>Close</Text>
             </Pressable>
           </View>
-          <View style={styles.sizeOptions}>
+          <ScrollView
+            style={styles.sizeOptionsScroller}
+            contentContainerStyle={styles.sizeOptions}
+          >
             {card ? (
               <Pressable
                 style={({ pressed }) => [
@@ -1495,8 +1945,8 @@ function DashboardSizePickerModal({
               </Pressable>
             ) : null}
             {spanHeights.map((height) => {
-              const groupedSpans = spans.filter((span) =>
-                span.endsWith(`x${height}`),
+              const groupedSpans = spans.filter(
+                (span) => getDashboardSpanDimensions(span).rows === height,
               );
 
               if (groupedSpans.length === 0) {
@@ -1506,7 +1956,7 @@ function DashboardSizePickerModal({
               return (
                 <View key={height} style={styles.sizeGroup}>
                   <Text style={styles.sizeGroupTitle}>
-                    {height} Tile{height === '1' ? '' : 's'} Tall
+                    {height} Tile{height === 1 ? '' : 's'} Tall
                   </Text>
                   <View style={styles.sizeGroupOptions}>
                     {groupedSpans.map((span) => {
@@ -1544,7 +1994,7 @@ function DashboardSizePickerModal({
                 </View>
               );
             })}
-          </View>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -1582,39 +2032,143 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       backgroundColor: colors.background,
     },
+    dashboardPager: {
+      flex: 1,
+    },
+    dashboardSlideViewport: {
+      flex: 1,
+      overflow: 'hidden',
+    },
+    dashboardSlidePage: {
+      flex: 1,
+    },
+    dashboardSlidePageOverlay: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+    },
     dashboardScroller: {
       flex: 1,
     },
+    dashboardPageDots: {
+      position: 'absolute',
+      right: 0,
+      bottom: 8,
+      left: 0,
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: 6,
+    },
+    dashboardPageDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 999,
+      backgroundColor: colors.border,
+    },
+    dashboardPageDotActive: {
+      width: 18,
+      backgroundColor: colors.accent,
+    },
+    editModeStatusAnchor: {
+      position: 'absolute',
+      right: 0,
+      left: 0,
+      zIndex: 12,
+      alignItems: 'center',
+    },
+    editModeStatus: {
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      backgroundColor: colors.card,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.14,
+      shadowRadius: 10,
+      elevation: 6,
+    },
+    editModeStatusTitle: {
+      color: colors.primaryText,
+      fontSize: 13,
+      fontWeight: '900',
+      lineHeight: 16,
+      textAlign: 'center',
+    },
+    editModeStatusDetail: {
+      marginTop: 2,
+      color: colors.mutedText,
+      fontSize: 11,
+      fontWeight: '800',
+      lineHeight: 14,
+      textAlign: 'center',
+    },
     editModeControls: {
       flexDirection: 'row',
+      flexWrap: 'nowrap',
       alignItems: 'center',
-      gap: 8,
+      justifyContent: 'flex-end',
+      gap: 6,
       backgroundColor: colors.card,
-      padding: 8,
+      paddingHorizontal: 6,
+      paddingTop: 8,
       paddingBottom: 10,
     },
-    editModeText: {
-      flex: 1,
-      color: colors.primaryText,
-      fontSize: 12,
-      fontWeight: '800',
+    editModeScreenControls: {
+      width: 104,
+      flexDirection: 'row',
+      flexShrink: 0,
+      gap: 6,
     },
     editModeButton: {
+      minWidth: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
       borderWidth: 1,
       borderColor: colors.border,
       borderRadius: 999,
-      paddingHorizontal: 10,
+      paddingHorizontal: 9,
       paddingVertical: 8,
+    },
+    editModeArrowButton: {
+      flex: 1,
+      paddingHorizontal: 0,
+    },
+    editModeActionButton: {
+      flexShrink: 1,
+      minWidth: 54,
+    },
+    editModeRemoveButton: {
+      borderColor: colors.danger,
+      backgroundColor: colors.dangerSoft,
     },
     editModeButtonText: {
       color: colors.primaryText,
       fontSize: 12,
       fontWeight: '900',
+      textAlign: 'center',
+    },
+    editModeRemoveButtonText: {
+      color: colors.danger,
+      fontSize: 12,
+      fontWeight: '900',
+      textAlign: 'center',
+    },
+    editModeArrowText: {
+      fontSize: 14,
+      lineHeight: 18,
     },
     editModeDoneButton: {
+      minWidth: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
       borderRadius: 999,
       backgroundColor: colors.success,
-      paddingHorizontal: 12,
+      paddingHorizontal: 11,
       paddingVertical: 9,
     },
     primaryButtonPressed: {
@@ -1643,6 +2197,7 @@ function createStyles(colors: ThemeColors) {
       color: '#fff',
       fontSize: 12,
       fontWeight: '900',
+      textAlign: 'center',
     },
     menuButton: {
       position: 'absolute',
@@ -1993,9 +2548,13 @@ function createStyles(colors: ThemeColors) {
       fontSize: 28,
     },
     sizeModalCard: {
+      maxHeight: '80%',
       backgroundColor: colors.card,
       paddingTop: 20,
       paddingBottom: 36,
+    },
+    sizeOptionsScroller: {
+      flexShrink: 1,
     },
     sizeOptions: {
       gap: 8,
