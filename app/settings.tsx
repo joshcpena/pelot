@@ -23,6 +23,7 @@ import {
   type BluetoothAccessState,
   type ScannedHeartRateDevice,
 } from '../src/features/devices/heartRateMonitor';
+import { clearRecentRouteDestinations } from '../src/features/ride/routePlanning';
 
 function OptionButton<T extends string>({
   label,
@@ -162,6 +163,11 @@ export default function SettingsScreen() {
   const [heartRateDevices, setHeartRateDevices] = useState<
     ScannedHeartRateDevice[]
   >([]);
+  const [isClearingSearchHistory, setIsClearingSearchHistory] = useState(false);
+  const [searchHistoryStatus, setSearchHistoryStatus] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   function update<K extends keyof RideSettings>(
     key: K,
@@ -262,6 +268,26 @@ export default function SettingsScreen() {
   function openDeviceModal() {
     setIsDeviceModalOpen(true);
     scanForHeartRateDevices().catch(() => {});
+  }
+
+  async function clearRouteSearchHistory() {
+    setIsClearingSearchHistory(true);
+    setSearchHistoryStatus(null);
+
+    try {
+      await clearRecentRouteDestinations();
+      setSearchHistoryStatus({
+        type: 'success',
+        message: 'Route search history cleared.',
+      });
+    } catch {
+      setSearchHistoryStatus({
+        type: 'error',
+        message: 'Could not clear route search history.',
+      });
+    } finally {
+      setIsClearingSearchHistory(false);
+    }
   }
 
   return (
@@ -710,6 +736,49 @@ export default function SettingsScreen() {
             onSelect={(value) => update('routeProfile', value)}
           />
         </View>
+        <View style={styles.divider} />
+        <View style={styles.switchRow}>
+          <View style={styles.switchCopy}>
+            <Text style={styles.label}>Route search history</Text>
+            <Text style={styles.muted}>
+              Clear recent destinations shown in the route planner.
+            </Text>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            disabled={isClearingSearchHistory}
+            style={({ pressed }) => [
+              styles.clearDeviceButton,
+              pressed && !isClearingSearchHistory && styles.dangerButtonPressed,
+              isClearingSearchHistory && styles.disabledButton,
+            ]}
+            onPress={clearRouteSearchHistory}
+          >
+            {({ pressed }) => (
+              <Text
+                style={[
+                  styles.clearDeviceButtonText,
+                  pressed &&
+                    !isClearingSearchHistory &&
+                    styles.dangerButtonTextPressed,
+                ]}
+              >
+                {isClearingSearchHistory ? 'Clearing...' : 'Clear'}
+              </Text>
+            )}
+          </Pressable>
+        </View>
+        {searchHistoryStatus ? (
+          <Text
+            style={[
+              searchHistoryStatus.type === 'error'
+                ? styles.error
+                : styles.success,
+            ]}
+          >
+            {searchHistoryStatus.message}
+          </Text>
+        ) : null}
       </Section>
 
       <Modal
@@ -1076,6 +1145,10 @@ function createStyles(colors: ThemeColors) {
     },
     error: {
       color: colors.danger,
+      fontWeight: '800',
+    },
+    success: {
+      color: colors.success,
       fontWeight: '800',
     },
     deviceRow: {

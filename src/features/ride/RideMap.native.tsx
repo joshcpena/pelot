@@ -791,9 +791,11 @@ function RideMapComponent({
         >
           <Text style={styles.mapActionIcon}>⛶</Text>
         </Pressable>
-        {isNavigating && onCancelNavigation ? (
+        {plannedRoute && onCancelNavigation ? (
           <Pressable
-            accessibilityLabel="Cancel navigation"
+            accessibilityLabel={
+              isNavigating ? 'Cancel navigation' : 'Remove planned route'
+            }
             hitSlop={8}
             style={({ pressed }) => [
               styles.mapActionButton,

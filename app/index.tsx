@@ -40,7 +40,10 @@ import {
 } from '../src/features/ride/dashboard';
 import { DashboardGrid } from '../src/features/ride/DashboardGrid';
 import {
+  getUpdatedRecentRouteDestinations,
+  loadRecentRouteDestinations,
   planBikeRoute,
+  saveRecentRouteDestinations,
   searchBikeDestinations,
 } from '../src/features/ride/routePlanning';
 import type {
@@ -216,8 +219,9 @@ export default function HomeScreen() {
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
   const styles = createStyles(colors);
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const dashboardPageWidth = Math.max(windowWidth, 1);
+  const routePlannerMaxHeight = Math.max(windowHeight * 0.8, 1);
   const recorder = useForegroundRideRecorder(settings);
   const lastRouteOriginRef = useRef<RouteCoordinate | null>(null);
   const rerouteInFlightRef = useRef(false);
@@ -225,10 +229,14 @@ export default function HomeScreen() {
   const autoDimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const brightnessBeforeDimRef = useRef<number | null>(null);
   const stopHoldCompletedRef = useRef(false);
+  const destinationInputRef = useRef<TextInput | null>(null);
   const [isRoutePlannerOpen, setIsRoutePlannerOpen] = useState(false);
   const [isNavigationOpen, setIsNavigationOpen] = useState(false);
   const [destinationInput, setDestinationInput] = useState('');
   const [destinationOptions, setDestinationOptions] = useState<
+    DestinationOption[]
+  >([]);
+  const [recentRouteDestinations, setRecentRouteDestinations] = useState<
     DestinationOption[]
   >([]);
   const [routeSearchOrigin, setRouteSearchOrigin] =
@@ -346,6 +354,12 @@ export default function HomeScreen() {
     currentWeather: weather.currentWeather,
     weatherSamples: weather.weatherSamples,
   };
+  const visibleRecentRouteDestinations =
+    destinationOptions.length === 0 && !isSearchingDestinations
+      ? recentRouteDestinations
+      : [];
+  const hasRoutePlannerOptionList =
+    visibleRecentRouteDestinations.length > 0 || destinationOptions.length > 0;
   const [dashboardSwipeResponder] = useState(() =>
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, gesture) =>
@@ -521,6 +535,26 @@ export default function HomeScreen() {
     return () => {
       showSubscription.remove();
       hideSubscription.remove();
+    };
+  }, [isRoutePlannerOpen]);
+
+  useEffect(() => {
+    if (!isRoutePlannerOpen) {
+      return;
+    }
+
+    let isMounted = true;
+
+    loadRecentRouteDestinations()
+      .then((destinations) => {
+        if (isMounted) {
+          setRecentRouteDestinations(destinations);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      isMounted = false;
     };
   }, [isRoutePlannerOpen]);
 
@@ -947,7 +981,17 @@ export default function HomeScreen() {
     }
   }
 
+  function clearDestinationInput() {
+    setDestinationInput('');
+    setDestinationOptions([]);
+    setRouteSearchOrigin(null);
+    setRoutePlanError(null);
+    destinationInputRef.current?.focus();
+  }
+
   async function handleSelectDestination(destination: DestinationOption) {
+    Keyboard.dismiss();
+    setDestinationInput(destination.name);
     setRoutePlanError(null);
     setIsPlanningRoute(true);
 
@@ -963,8 +1007,8 @@ export default function HomeScreen() {
       setSelectedDestination(destination);
       setDestinationOptions([]);
       setRouteSearchOrigin(null);
-      setRoutePlannerKeyboardHeight(0);
-      setIsRoutePlannerOpen(false);
+      rememberRecentRouteDestination(destination);
+      closeRoutePlanner();
     } catch (error) {
       setRoutePlanError(
         error instanceof Error ? error.message : 'Could not plan bike route.',
@@ -972,6 +1016,24 @@ export default function HomeScreen() {
     } finally {
       setIsPlanningRoute(false);
     }
+  }
+
+  function closeRoutePlanner() {
+    Keyboard.dismiss();
+    setRoutePlannerKeyboardHeight(0);
+    setIsRoutePlannerOpen(false);
+  }
+
+  function rememberRecentRouteDestination(destination: DestinationOption) {
+    setRecentRouteDestinations((currentDestinations) => {
+      const updatedDestinations = getUpdatedRecentRouteDestinations(
+        destination,
+        currentDestinations,
+      );
+
+      saveRecentRouteDestinations(updatedDestinations).catch(() => undefined);
+      return updatedDestinations;
+    });
   }
 
   function cancelNavigation() {
@@ -1064,7 +1126,7 @@ export default function HomeScreen() {
         },
       ]}
     >
-      <View style={styles.modalCard}>
+      <View style={[styles.modalCard, { maxHeight: routePlannerMaxHeight }]}>
         <Text style={styles.modalTitle}>Plan bike route</Text>
         <Text style={styles.modalCopy}>
           Enter a destination, pick the correct result on the map or list, then
@@ -1073,48 +1135,114 @@ export default function HomeScreen() {
         {routePlanError ? (
           <Text style={styles.error}>{routePlanError}</Text>
         ) : null}
-        <TextInput
-          autoCapitalize="words"
-          autoCorrect={false}
-          onChangeText={(value) => {
-            setDestinationInput(value);
-            setDestinationOptions([]);
-            setRoutePlanError(null);
-          }}
-          editable={!isSearchingDestinations && !isPlanningRoute}
-          onSubmitEditing={handleSearchDestinations}
-          placeholder="e.g. Gravelly Point"
-          placeholderTextColor="#6e7681"
-          returnKeyType="search"
-          style={styles.destinationInput}
-          value={destinationInput}
-        />
-        {destinationOptions.length > 0 ? (
-          <ScrollView style={styles.destinationResults}>
-            {destinationOptions.map((option, index) => (
-              <Pressable
-                key={option.id}
-                disabled={isPlanningRoute}
-                style={({ pressed }) => [
-                  styles.destinationOption,
-                  pressed && styles.listButtonPressed,
-                  isPlanningRoute && styles.disabledButton,
-                ]}
-                onPress={() => handleSelectDestination(option)}
-              >
-                <Text style={styles.destinationOptionIndex}>{index + 1}</Text>
-                <View style={styles.destinationOptionCopy}>
-                  <Text style={styles.destinationOptionName}>
-                    {option.name}
-                  </Text>
-                  {option.address ? (
-                    <Text style={styles.destinationOptionAddress}>
-                      {option.address}
+        <View style={styles.destinationInputWrapper}>
+          <TextInput
+            ref={destinationInputRef}
+            autoCapitalize="words"
+            autoCorrect={false}
+            onChangeText={(value) => {
+              setDestinationInput(value);
+              setDestinationOptions([]);
+              setRoutePlanError(null);
+            }}
+            editable={!isSearchingDestinations && !isPlanningRoute}
+            onSubmitEditing={handleSearchDestinations}
+            placeholder="e.g. Gravelly Point"
+            placeholderTextColor="#6e7681"
+            returnKeyType="search"
+            style={styles.destinationInput}
+            value={destinationInput}
+          />
+          {destinationInput.length > 0 ? (
+            <Pressable
+              accessibilityLabel="Clear destination"
+              accessibilityRole="button"
+              disabled={isSearchingDestinations || isPlanningRoute}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.destinationInputClearButton,
+                pressed && styles.subtleButtonPressed,
+                (isSearchingDestinations || isPlanningRoute) &&
+                  styles.disabledButton,
+              ]}
+              onPress={clearDestinationInput}
+            >
+              <Text style={styles.destinationInputClearButtonText}>x</Text>
+            </Pressable>
+          ) : null}
+        </View>
+        {hasRoutePlannerOptionList ? (
+          <ScrollView
+            contentContainerStyle={styles.routePlannerOptions}
+            keyboardShouldPersistTaps="handled"
+            style={styles.routePlannerOptionsScroller}
+          >
+            {visibleRecentRouteDestinations.length > 0 ? (
+              <View style={styles.destinationSection}>
+                <Text style={styles.destinationSectionTitle}>
+                  Recent destinations
+                </Text>
+                {visibleRecentRouteDestinations.map((option, index) => (
+                  <Pressable
+                    key={option.id}
+                    disabled={isPlanningRoute}
+                    style={({ pressed }) => [
+                      styles.destinationOption,
+                      pressed && styles.listButtonPressed,
+                      isPlanningRoute && styles.disabledButton,
+                    ]}
+                    onPress={() => handleSelectDestination(option)}
+                  >
+                    <Text style={styles.destinationOptionIndex}>
+                      {index + 1}
                     </Text>
-                  ) : null}
-                </View>
-              </Pressable>
-            ))}
+                    <View style={styles.destinationOptionCopy}>
+                      <Text style={styles.destinationOptionName}>
+                        {option.name}
+                      </Text>
+                      {option.address ? (
+                        <Text style={styles.destinationOptionAddress}>
+                          {option.address}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+            {destinationOptions.length > 0 ? (
+              <View style={styles.destinationSection}>
+                <Text style={styles.destinationSectionTitle}>
+                  Search results
+                </Text>
+                {destinationOptions.map((option, index) => (
+                  <Pressable
+                    key={option.id}
+                    disabled={isPlanningRoute}
+                    style={({ pressed }) => [
+                      styles.destinationOption,
+                      pressed && styles.listButtonPressed,
+                      isPlanningRoute && styles.disabledButton,
+                    ]}
+                    onPress={() => handleSelectDestination(option)}
+                  >
+                    <Text style={styles.destinationOptionIndex}>
+                      {index + 1}
+                    </Text>
+                    <View style={styles.destinationOptionCopy}>
+                      <Text style={styles.destinationOptionName}>
+                        {option.name}
+                      </Text>
+                      {option.address ? (
+                        <Text style={styles.destinationOptionAddress}>
+                          {option.address}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
           </ScrollView>
         ) : null}
         <View style={styles.modalActions}>
@@ -1123,10 +1251,7 @@ export default function HomeScreen() {
               styles.modalSecondaryButton,
               pressed && styles.subtleButtonPressed,
             ]}
-            onPress={() => {
-              setRoutePlannerKeyboardHeight(0);
-              setIsRoutePlannerOpen(false);
-            }}
+            onPress={closeRoutePlanner}
           >
             <Text style={styles.modalSecondaryButtonText}>Cancel</Text>
           </Pressable>
@@ -2662,6 +2787,9 @@ function createStyles(colors: ThemeColors) {
       fontSize: 15,
       lineHeight: 21,
     },
+    destinationInputWrapper: {
+      position: 'relative',
+    },
     destinationInput: {
       borderWidth: 1,
       borderColor: colors.border,
@@ -2669,11 +2797,42 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.background,
       color: colors.primaryText,
       fontSize: 18,
-      paddingHorizontal: 16,
+      paddingLeft: 16,
+      paddingRight: 52,
       paddingVertical: 14,
     },
-    destinationResults: {
-      maxHeight: 240,
+    destinationInputClearButton: {
+      position: 'absolute',
+      top: 10,
+      right: 10,
+      width: 32,
+      height: 32,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 999,
+      backgroundColor: colors.elevatedCard,
+    },
+    destinationInputClearButtonText: {
+      color: colors.mutedText,
+      fontSize: 18,
+      fontWeight: '900',
+      lineHeight: 22,
+      textAlign: 'center',
+    },
+    routePlannerOptionsScroller: {
+      flexShrink: 1,
+    },
+    routePlannerOptions: {
+      gap: 12,
+    },
+    destinationSection: {
+      gap: 8,
+    },
+    destinationSectionTitle: {
+      color: colors.mutedText,
+      fontSize: 12,
+      fontWeight: '900',
+      textTransform: 'uppercase',
     },
     destinationOption: {
       flexDirection: 'row',

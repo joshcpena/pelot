@@ -4,12 +4,15 @@ import type {
   RouteProfile,
   RouteCoordinate,
 } from './types';
+import { getDatabase, initializeDatabase } from '../../lib/database';
 
 const openRouteServiceProfiles: Record<RouteProfile, string> = {
   bike: 'cycling-regular',
   roadbike: 'cycling-road',
   mtb: 'cycling-mountain',
 };
+const RECENT_ROUTE_DESTINATIONS_SETTING_KEY = 'recentRouteDestinations';
+export const MAX_RECENT_ROUTE_DESTINATIONS = 10;
 
 type MapTilerGeocodingResponse = {
   features?: {
@@ -68,6 +71,10 @@ type ApiErrorResponse = {
   error_message?: string;
 };
 
+type SettingRow = {
+  value: string;
+};
+
 export type PlanBikeRouteInput = {
   destination: DestinationOption;
   origin: RouteCoordinate;
@@ -90,6 +97,133 @@ function toCoordinate(
 
 function toLngLat(coordinate: RouteCoordinate) {
   return [coordinate.longitude, coordinate.latitude];
+}
+
+function getDestinationOptionKey(destination: DestinationOption) {
+  return `${destination.name.trim().toLowerCase()}:${destination.coordinate.latitude.toFixed(6)},${destination.coordinate.longitude.toFixed(6)}`;
+}
+
+function toSafeDestinationOption(value: unknown): DestinationOption | null {
+  if (typeof value !== 'object' || value == null) {
+    return null;
+  }
+
+  const option = value as Partial<DestinationOption>;
+  const coordinate = option.coordinate;
+
+  if (typeof coordinate !== 'object' || coordinate == null) {
+    return null;
+  }
+
+  const { latitude, longitude } = coordinate as Partial<RouteCoordinate>;
+
+  if (
+    typeof option.id !== 'string' ||
+    typeof option.name !== 'string' ||
+    !option.name.trim() ||
+    (option.address != null && typeof option.address !== 'string') ||
+    typeof latitude !== 'number' ||
+    !Number.isFinite(latitude) ||
+    typeof longitude !== 'number' ||
+    !Number.isFinite(longitude)
+  ) {
+    return null;
+  }
+
+  return {
+    id: option.id,
+    name: option.name,
+    address: option.address ?? null,
+    coordinate: {
+      latitude,
+      longitude,
+    },
+  };
+}
+
+function normalizeRecentRouteDestinations(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const destinations: DestinationOption[] = [];
+
+  for (const item of value) {
+    const destination = toSafeDestinationOption(item);
+
+    if (!destination) {
+      continue;
+    }
+
+    const key = getDestinationOptionKey(destination);
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    destinations.push(destination);
+
+    if (destinations.length >= MAX_RECENT_ROUTE_DESTINATIONS) {
+      break;
+    }
+  }
+
+  return destinations;
+}
+
+export function getUpdatedRecentRouteDestinations(
+  destination: DestinationOption,
+  currentDestinations: DestinationOption[],
+) {
+  return normalizeRecentRouteDestinations([
+    destination,
+    ...currentDestinations,
+  ]);
+}
+
+export async function loadRecentRouteDestinations() {
+  await initializeDatabase();
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<SettingRow>(
+    'SELECT value FROM settings WHERE key = ?',
+    RECENT_ROUTE_DESTINATIONS_SETTING_KEY,
+  );
+  const storedDestinations = rows[0]?.value;
+
+  if (!storedDestinations) {
+    return [];
+  }
+
+  try {
+    return normalizeRecentRouteDestinations(JSON.parse(storedDestinations));
+  } catch {
+    return [];
+  }
+}
+
+export async function saveRecentRouteDestinations(
+  destinations: DestinationOption[],
+) {
+  await initializeDatabase();
+  const db = await getDatabase();
+
+  await db.runAsync(
+    'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+    RECENT_ROUTE_DESTINATIONS_SETTING_KEY,
+    JSON.stringify(normalizeRecentRouteDestinations(destinations)),
+  );
+}
+
+export async function clearRecentRouteDestinations() {
+  await initializeDatabase();
+  const db = await getDatabase();
+
+  await db.runAsync(
+    'DELETE FROM settings WHERE key = ?',
+    RECENT_ROUTE_DESTINATIONS_SETTING_KEY,
+  );
 }
 
 function getSearchBoundingBox(origin: RouteCoordinate, radiusMeters = 50000) {
