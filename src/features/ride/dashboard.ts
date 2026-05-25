@@ -61,6 +61,10 @@ export type DashboardMetricDefinition = {
   getValue: (context: DashboardValueContext) => string;
 };
 
+export const DASHBOARD_COLUMNS = 3;
+export const DASHBOARD_MAX_ROWS = 10;
+const DASHBOARD_LAYOUT_EPSILON = 0.001;
+
 export const dashboardSpans: DashboardCardSpan[] = [
   '1x1',
   '1x2',
@@ -83,6 +87,48 @@ export const dashboardSpans: DashboardCardSpan[] = [
   '3x4',
   '3x5',
 ];
+
+export function getDashboardSpanDimensions(span: DashboardCardSpan) {
+  const [columns, rows] = span.split('x').map(Number);
+
+  return { columns, rows };
+}
+
+export function getDashboardLayoutRows(layout: Pick<DashboardCard, 'span'>[]) {
+  let totalRows = 0;
+  let lineColumns = 0;
+  let lineRows = 0;
+
+  for (const card of layout) {
+    const { columns, rows } = getDashboardSpanDimensions(card.span);
+
+    if (
+      lineColumns > 0 &&
+      lineColumns + columns > DASHBOARD_COLUMNS + DASHBOARD_LAYOUT_EPSILON
+    ) {
+      totalRows += lineRows;
+      lineColumns = 0;
+      lineRows = 0;
+    }
+
+    lineColumns += columns;
+    lineRows = Math.max(lineRows, rows);
+  }
+
+  return totalRows + lineRows;
+}
+
+export function dashboardLayoutFits(layout: Pick<DashboardCard, 'span'>[]) {
+  return getDashboardLayoutRows(layout) <= DASHBOARD_MAX_ROWS;
+}
+
+export function getFittingDashboardLayout(layout: DashboardCard[]) {
+  return layout.reduce<DashboardCard[]>((fittingLayout, card) => {
+    const nextLayout = [...fittingLayout, card];
+
+    return dashboardLayoutFits(nextLayout) ? nextLayout : fittingLayout;
+  }, []);
+}
 
 export const defaultDashboardLayout: DashboardCard[] = [
   { id: 'card-map', metricId: 'map', span: '3x5' },
@@ -1119,6 +1165,26 @@ export function createDashboardCard(
   };
 }
 
+export function canAddDashboardMetric(
+  layout: DashboardCard[],
+  metricId: DashboardMetricId,
+) {
+  const metric = dashboardMetricById.get(metricId);
+
+  if (!metric) {
+    return false;
+  }
+
+  return dashboardLayoutFits([
+    ...layout,
+    {
+      id: 'card-preview',
+      metricId,
+      span: metric.defaultSpan,
+    },
+  ]);
+}
+
 export function validateDashboardLayout(value: unknown): DashboardCard[] {
   if (!Array.isArray(value)) {
     return defaultDashboardLayout;
@@ -1152,6 +1218,7 @@ export function validateDashboardLayout(value: unknown): DashboardCard[] {
       ...card,
       span: card.span.replace('1/2x', '1.5x') as DashboardCardSpan,
     }));
+  const fittingCards = getFittingDashboardLayout(validCards);
 
-  return validCards.length > 0 ? validCards : defaultDashboardLayout;
+  return fittingCards.length > 0 ? fittingCards : defaultDashboardLayout;
 }

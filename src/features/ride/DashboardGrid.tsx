@@ -13,7 +13,11 @@ import {
 } from 'react-native';
 
 import type { ThemeColors } from '../settings/settings';
-import { dashboardMetricById, type DashboardValueContext } from './dashboard';
+import {
+  dashboardMetricById,
+  getDashboardSpanDimensions,
+  type DashboardValueContext,
+} from './dashboard';
 import { RideMap } from './RideMap';
 import type { DashboardCard, RideSettings } from './types';
 
@@ -46,18 +50,13 @@ function getOverlapArea(a: CardLayout, b: CardLayout) {
   return xOverlap * yOverlap;
 }
 
-function getSpanDimensions(span: DashboardCard['span']) {
-  const [columns, rows] = span.split('x').map(Number);
-
-  return { columns, rows };
-}
-
 export function DashboardGrid({
   colors,
   context,
   layout,
   settings,
   rowHeight = 66,
+  canAddCard = true,
   onLongPressCard,
   isEditing = false,
   onAddCard,
@@ -71,6 +70,7 @@ export function DashboardGrid({
   layout: DashboardCard[];
   settings: RideSettings;
   rowHeight?: number;
+  canAddCard?: boolean;
   onLongPressCard?: (card: DashboardCard) => void;
   isEditing?: boolean;
   onAddCard?: () => void;
@@ -213,7 +213,7 @@ export function DashboardGrid({
       return null;
     }
 
-    const { columns, rows } = getSpanDimensions(card.span);
+    const { columns, rows } = getDashboardSpanDimensions(card.span);
     const width = `${(columns / 3) * 100}%` as DimensionValue;
     const height = rows * rowHeight;
     const cardStyle = { width, height };
@@ -291,10 +291,11 @@ export function DashboardGrid({
   const grid = (
     <View style={styles.grid}>
       {cards}
-      {isEditing ? (
+      {isEditing && canAddCard ? (
         <Pressable
           style={({ pressed }) => [
             styles.addTile,
+            { height: rowHeight },
             pressed && styles.addTilePressed,
           ]}
           onPress={onAddCard}
@@ -339,7 +340,7 @@ export function DashboardGrid({
       return null;
     }
 
-    const { columns } = getSpanDimensions(card.span);
+    const { columns } = getDashboardSpanDimensions(card.span);
 
     return card.metricId === 'map' ? (
       <View style={styles.mapContent}>
@@ -358,7 +359,7 @@ export function DashboardGrid({
         metricId={card.metricId}
         label={metric.label}
         columns={columns}
-        rows={getSpanDimensions(card.span).rows}
+        rows={getDashboardSpanDimensions(card.span).rows}
         value={metric.getValue(context)}
       />
     );

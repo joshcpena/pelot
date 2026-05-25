@@ -24,10 +24,14 @@ import {
   useThemeColors,
 } from '../src/features/settings/settings';
 import {
+  DASHBOARD_MAX_ROWS,
+  canAddDashboardMetric,
   createDashboardCard,
+  dashboardLayoutFits,
   dashboardMetricById,
   dashboardMetricCatalog,
   dashboardSpans,
+  getDashboardLayoutRows,
   type DashboardMetricCategory,
 } from '../src/features/ride/dashboard';
 import { DashboardGrid } from '../src/features/ride/DashboardGrid';
@@ -241,6 +245,11 @@ export default function HomeScreen() {
   const displayedLayout = isEditingDashboard
     ? layoutDraft
     : settings.dashboardLayout;
+  const layoutDraftRows = getDashboardLayoutRows(layoutDraft);
+  const layoutDraftFits = dashboardLayoutFits(layoutDraft);
+  const canAddDashboardCard = dashboardMetricCatalog.some((metric) =>
+    canAddDashboardMetric(layoutDraft, metric.id),
+  );
   const shouldConnectHeartRate = displayedLayout.some(
     (card) => card.metricId === 'heartRateCurrent',
   );
@@ -467,6 +476,10 @@ export default function HomeScreen() {
   }
 
   function saveDashboardLayout() {
+    if (!layoutDraftFits) {
+      return;
+    }
+
     updateSetting('dashboardLayout', layoutDraft).catch(() => {});
     setIsEditingDashboard(false);
   }
@@ -498,12 +511,19 @@ export default function HomeScreen() {
     const next = [...layoutDraft];
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
-    setDashboardLayoutDraft(next);
+
+    if (dashboardLayoutFits(next)) {
+      setDashboardLayoutDraft(next);
+    }
   }
 
   function chooseDashboardMetric(metricId: DashboardMetricId) {
     if (metricPickerCardId === 'new') {
-      setDashboardLayoutDraft([...layoutDraft, createDashboardCard(metricId)]);
+      const nextLayout = [...layoutDraft, createDashboardCard(metricId)];
+
+      if (dashboardLayoutFits(nextLayout)) {
+        setDashboardLayoutDraft(nextLayout);
+      }
     } else if (metricPickerCardId) {
       updateDashboardCard(metricPickerCardId, { metricId });
     }
@@ -513,7 +533,13 @@ export default function HomeScreen() {
 
   function chooseDashboardSpan(span: DashboardCardSpan) {
     if (sizePickerCardId) {
-      updateDashboardCard(sizePickerCardId, { span });
+      const nextLayout = layoutDraft.map((card) =>
+        card.id === sizePickerCardId ? { ...card, span } : card,
+      );
+
+      if (dashboardLayoutFits(nextLayout)) {
+        setDashboardLayoutDraft(nextLayout);
+      }
     }
 
     setSizePickerCardId(null);
@@ -981,11 +1007,9 @@ export default function HomeScreen() {
             setDashboardHeight(event.nativeEvent.layout.height - insets.top);
           }}
         >
-          <ScrollView
-            style={styles.dashboardScroller}
-            scrollEnabled={isEditingDashboard}
-          >
+          <ScrollView style={styles.dashboardScroller} scrollEnabled={false}>
             <DashboardGrid
+              canAddCard={canAddDashboardCard}
               colors={colors}
               context={{
                 metrics: recorder.metrics,
@@ -1043,7 +1067,7 @@ export default function HomeScreen() {
         {isEditingDashboard ? (
           <View style={styles.editModeControls}>
             <Text style={styles.editModeText}>
-              Drag to reorder. Tap to customize.
+              {layoutDraftRows}/{DASHBOARD_MAX_ROWS} rows used
             </Text>
             <Pressable
               style={({ pressed }) => [
@@ -1055,9 +1079,11 @@ export default function HomeScreen() {
               <Text style={styles.editModeButtonText}>Reset</Text>
             </Pressable>
             <Pressable
+              disabled={!layoutDraftFits}
               style={({ pressed }) => [
                 styles.editModeDoneButton,
-                pressed && styles.primaryButtonPressed,
+                !layoutDraftFits && styles.disabledButton,
+                pressed && layoutDraftFits && styles.primaryButtonPressed,
               ]}
               onPress={saveDashboardLayout}
             >
@@ -1202,6 +1228,10 @@ export default function HomeScreen() {
 
       <DashboardMetricPickerModal
         colors={colors}
+        canSelectMetric={(metricId) =>
+          metricPickerCardId !== 'new' ||
+          canAddDashboardMetric(layoutDraft, metricId)
+        }
         visible={metricPickerCardId != null}
         onClose={() => setMetricPickerCardId(null)}
         onSelect={chooseDashboardMetric}
@@ -1215,6 +1245,14 @@ export default function HomeScreen() {
           setSizePickerCardId(null);
           setMetricPickerCardId(cardId);
         }}
+        canSelectSpan={(span) =>
+          sizePickerCardId != null &&
+          dashboardLayoutFits(
+            layoutDraft.map((card) =>
+              card.id === sizePickerCardId ? { ...card, span } : card,
+            ),
+          )
+        }
         onSelect={chooseDashboardSpan}
       />
       <Modal
@@ -1320,11 +1358,13 @@ export default function HomeScreen() {
 
 function DashboardMetricPickerModal({
   colors,
+  canSelectMetric,
   visible,
   onClose,
   onSelect,
 }: {
   colors: ThemeColors;
+  canSelectMetric: (metricId: DashboardMetricId) => boolean;
   visible: boolean;
   onClose: () => void;
   onSelect: (metricId: DashboardMetricId) => void;
@@ -1348,20 +1388,40 @@ function DashboardMetricPickerModal({
             <Text style={styles.pickerSectionTitle}>{category}</Text>
             {dashboardMetricCatalog
               .filter((metric) => metric.category === category)
-              .map((metric, index, metrics) => (
-                <Pressable
-                  key={metric.id}
-                  style={({ pressed }) => [
-                    styles.pickerRow,
-                    index === metrics.length - 1 && styles.pickerRowLast,
-                    pressed && styles.listButtonPressed,
-                  ]}
-                  onPress={() => onSelect(metric.id)}
-                >
-                  <Text style={styles.pickerLabel}>{metric.label}</Text>
-                  <Text style={styles.pickerChevron}>›</Text>
-                </Pressable>
-              ))}
+              .map((metric, index, metrics) => {
+                const canSelect = canSelectMetric(metric.id);
+
+                return (
+                  <Pressable
+                    key={metric.id}
+                    disabled={!canSelect}
+                    style={({ pressed }) => [
+                      styles.pickerRow,
+                      index === metrics.length - 1 && styles.pickerRowLast,
+                      !canSelect && styles.pickerRowDisabled,
+                      pressed && styles.listButtonPressed,
+                    ]}
+                    onPress={() => onSelect(metric.id)}
+                  >
+                    <Text
+                      style={[
+                        styles.pickerLabel,
+                        !canSelect && styles.pickerLabelDisabled,
+                      ]}
+                    >
+                      {metric.label}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.pickerChevron,
+                        !canSelect && styles.pickerLabelDisabled,
+                      ]}
+                    >
+                      ›
+                    </Text>
+                  </Pressable>
+                );
+              })}
           </View>
         ))}
       </ScrollView>
@@ -1375,6 +1435,7 @@ function DashboardSizePickerModal({
   visible,
   onClose,
   onChangeMetric,
+  canSelectSpan,
   onSelect,
 }: {
   colors: ThemeColors;
@@ -1382,6 +1443,7 @@ function DashboardSizePickerModal({
   visible: boolean;
   onClose: () => void;
   onChangeMetric: (cardId: string) => void;
+  canSelectSpan: (span: DashboardCardSpan) => boolean;
   onSelect: (span: DashboardCardSpan) => void;
 }) {
   const styles = createStyles(colors);
@@ -1447,30 +1509,37 @@ function DashboardSizePickerModal({
                     {height} Tile{height === '1' ? '' : 's'} Tall
                   </Text>
                   <View style={styles.sizeGroupOptions}>
-                    {groupedSpans.map((span) => (
-                      <Pressable
-                        key={span}
-                        style={({ pressed }) => [
-                          styles.spanButton,
-                          card?.span === span && styles.spanButtonSelected,
-                          pressed && styles.subtleButtonPressed,
-                          pressed &&
-                            card?.span === span &&
-                            styles.selectedButtonPressed,
-                        ]}
-                        onPress={() => onSelect(span)}
-                      >
-                        <Text
-                          style={[
-                            styles.spanButtonText,
-                            card?.span === span &&
-                              styles.spanButtonTextSelected,
+                    {groupedSpans.map((span) => {
+                      const canSelect = canSelectSpan(span);
+
+                      return (
+                        <Pressable
+                          key={span}
+                          disabled={!canSelect}
+                          style={({ pressed }) => [
+                            styles.spanButton,
+                            card?.span === span && styles.spanButtonSelected,
+                            !canSelect && styles.spanButtonDisabled,
+                            pressed && styles.subtleButtonPressed,
+                            pressed &&
+                              card?.span === span &&
+                              styles.selectedButtonPressed,
                           ]}
+                          onPress={() => onSelect(span)}
                         >
-                          {span}
-                        </Text>
-                      </Pressable>
-                    ))}
+                          <Text
+                            style={[
+                              styles.spanButtonText,
+                              card?.span === span &&
+                                styles.spanButtonTextSelected,
+                              !canSelect && styles.spanButtonTextDisabled,
+                            ]}
+                          >
+                            {span}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
                   </View>
                 </View>
               );
@@ -1908,10 +1977,16 @@ function createStyles(colors: ThemeColors) {
     pickerRowLast: {
       borderBottomWidth: 0,
     },
+    pickerRowDisabled: {
+      opacity: 0.45,
+    },
     pickerLabel: {
       color: colors.primaryText,
       fontSize: 16,
       fontWeight: '700',
+    },
+    pickerLabelDisabled: {
+      color: colors.mutedText,
     },
     pickerChevron: {
       color: colors.accent,
@@ -1965,12 +2040,18 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.accent,
       backgroundColor: colors.accent,
     },
+    spanButtonDisabled: {
+      opacity: 0.45,
+    },
     spanButtonText: {
       color: colors.primaryText,
       fontWeight: '900',
     },
     spanButtonTextSelected: {
       color: '#fff',
+    },
+    spanButtonTextDisabled: {
+      color: colors.mutedText,
     },
     modalCard: {
       gap: 14,
