@@ -20,7 +20,7 @@ import {
   finishRide,
   insertRidePoint,
   calculateMetricsFromPoints,
-  loadRidePointsAfter,
+  loadRidePoints,
   setActiveRideId,
 } from './rideStorage';
 import type { RideMetrics, RidePoint, RideSettings, RideStatus } from './types';
@@ -32,6 +32,7 @@ const BEST_GPS_DISTANCE_INTERVAL_METERS = 5;
 const STANDARD_GPS_TIME_INTERVAL_MS = 5000;
 const BEST_GPS_TIME_INTERVAL_MS = 1000;
 const BAROMETER_UPDATE_INTERVAL_MS = 5000;
+const RESUME_POINT_SYNC_DELAY_MS = 1500;
 
 const initialMetrics: RideMetrics = {
   startedAt: null,
@@ -79,6 +80,38 @@ function toRidePoint(
   };
 }
 
+function getRidePointKey(point: RidePoint) {
+  return [point.recordedAt, point.latitude, point.longitude].join(':');
+}
+
+function mergeRidePoints(
+  currentPoints: RidePoint[],
+  persistedPoints: RidePoint[],
+) {
+  const pointsByKey = new Map<string, RidePoint>();
+
+  for (const point of [...currentPoints, ...persistedPoints]) {
+    pointsByKey.set(getRidePointKey(point), point);
+  }
+
+  return [...pointsByKey.values()].sort(
+    (first, second) => first.recordedAt - second.recordedAt,
+  );
+}
+
+function areRidePointListsEqual(
+  firstPoints: RidePoint[],
+  secondPoints: RidePoint[],
+) {
+  return (
+    firstPoints.length === secondPoints.length &&
+    firstPoints.every(
+      (point, index) =>
+        getRidePointKey(point) === getRidePointKey(secondPoints[index]),
+    )
+  );
+}
+
 function getLocationAccuracy(settings: RideSettings) {
   return settings.gpsAccuracy === 'best'
     ? Location.Accuracy.BestForNavigation
@@ -123,6 +156,10 @@ export function useForegroundRideRecorder(settings: RideSettings) {
   const pausedStartedAtRef = useRef<number | null>(null);
   const accumulatedElapsedSecondsRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const resumePointSyncTimeoutRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const shouldSyncBeforeNextLocationRef = useRef(false);
 
   useEffect(() => {
     settingsRef.current = settings;
@@ -308,6 +345,11 @@ export function useForegroundRideRecorder(settings: RideSettings) {
           return;
         }
 
+        if (shouldSyncBeforeNextLocationRef.current) {
+          shouldSyncBeforeNextLocationRef.current = false;
+          await syncPersistedRidePoints();
+        }
+
         const point = toRidePoint(location, barometerAltitudeRef.current);
         const previousPoint = previousPointRef.current;
         const reportedSpeed = point.speedMps ?? 0;
@@ -421,19 +463,18 @@ export function useForegroundRideRecorder(settings: RideSettings) {
       return;
     }
 
-    const lastRecordedAt = previousPointRef.current?.recordedAt ?? 0;
-    const newPoints = await loadRidePointsAfter(
-      rideIdRef.current,
-      lastRecordedAt,
+    const persistedPoints = await loadRidePoints(rideIdRef.current);
+    const nextRoutePoints = mergeRidePoints(
+      routePointsRef.current,
+      persistedPoints,
     );
+    const latestPoint = nextRoutePoints.at(-1) ?? null;
 
-    if (newPoints.length === 0) {
+    previousPointRef.current = latestPoint;
+
+    if (areRidePointListsEqual(routePointsRef.current, nextRoutePoints)) {
       return;
     }
-
-    const nextRoutePoints = [...routePointsRef.current, ...newPoints];
-
-    const latestPoint = newPoints.at(-1) ?? null;
 
     updateRoutePoints(nextRoutePoints);
 
@@ -471,8 +512,28 @@ export function useForegroundRideRecorder(settings: RideSettings) {
         ),
       );
     }
+  }
 
-    previousPointRef.current = latestPoint;
+  function clearResumePointSync() {
+    if (!resumePointSyncTimeoutRef.current) {
+      return;
+    }
+
+    clearTimeout(resumePointSyncTimeoutRef.current);
+    resumePointSyncTimeoutRef.current = null;
+  }
+
+  function scheduleResumePointSync() {
+    clearResumePointSync();
+    resumePointSyncTimeoutRef.current = setTimeout(() => {
+      resumePointSyncTimeoutRef.current = null;
+
+      if (statusRef.current !== 'recording') {
+        return;
+      }
+
+      syncPersistedRidePoints().catch(() => undefined);
+    }, RESUME_POINT_SYNC_DELAY_MS);
   }
 
   async function handleAppStateChange(nextState: AppStateStatus) {
@@ -482,11 +543,15 @@ export function useForegroundRideRecorder(settings: RideSettings) {
 
     if (nextState === 'active') {
       await stopBackgroundRecordingIfNeeded();
+      shouldSyncBeforeNextLocationRef.current = true;
       await syncPersistedRidePoints();
+      scheduleResumePointSync();
       await startWatchingLocation();
       return;
     }
 
+    clearResumePointSync();
+    shouldSyncBeforeNextLocationRef.current = false;
     await stopWatchingLocation();
     await startBackgroundRecordingIfNeeded();
   }
@@ -514,6 +579,8 @@ export function useForegroundRideRecorder(settings: RideSettings) {
 
     rideIdRef.current = rideId;
     previousPointRef.current = null;
+    shouldSyncBeforeNextLocationRef.current = false;
+    clearResumePointSync();
     pausedStartedAtRef.current = null;
     accumulatedElapsedSecondsRef.current = 0;
     updateMetrics(
@@ -553,6 +620,8 @@ export function useForegroundRideRecorder(settings: RideSettings) {
     await stopWatchingLocation();
     stopWatchingBarometer();
     await stopBackgroundRecordingIfNeeded();
+    clearResumePointSync();
+    shouldSyncBeforeNextLocationRef.current = false;
     await deactivateKeepAwake(KEEP_AWAKE_TAG);
     pausedStartedAtRef.current = Date.now();
     isAutoPausedRef.current = false;
@@ -587,6 +656,9 @@ export function useForegroundRideRecorder(settings: RideSettings) {
     await stopWatchingLocation();
     stopWatchingBarometer();
     await stopBackgroundRecordingIfNeeded();
+    await syncPersistedRidePoints();
+    clearResumePointSync();
+    shouldSyncBeforeNextLocationRef.current = false;
     await deactivateKeepAwake(KEEP_AWAKE_TAG);
     const finalMetrics = withEstimatedCalories(
       {
@@ -621,6 +693,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
     return () => {
       subscription.remove();
       stopTimer();
+      clearResumePointSync();
       watchRef.current?.remove();
       barometerWatchRef.current?.remove();
       stopBackgroundRideRecording().catch(() => {});

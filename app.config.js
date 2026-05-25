@@ -4,7 +4,7 @@ module.exports = {
   expo: {
     name: 'Pelot',
     slug: 'pelot',
-    version: '0.0.1',
+    version: '0.0.2',
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'automatic',
@@ -26,6 +26,7 @@ module.exports = {
     },
     android: {
       package: 'com.sevro.pelot',
+      versionCode: 2,
       icon: './assets/icon.png',
       permissions: [
         'ACCESS_COARSE_LOCATION',

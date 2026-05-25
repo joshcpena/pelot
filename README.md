@@ -9,8 +9,8 @@ npm install
 npm run start
 ```
 
-Native maps, place search, and bike routing need MapTiler and OpenRouteService
-API keys:
+Native maps use OpenFreeMap for map tiles/styles without an API key. Place
+search and bike routing need MapTiler and OpenRouteService API keys:
 
 ```sh
 cp .env.example .env
@@ -38,7 +38,8 @@ npm run build:android:local
 ```
 
 This script loads `.env` before bundling so `EXPO_PUBLIC_MAPTILER_API_KEY` and
-`EXPO_PUBLIC_OPENROUTESERVICE_API_KEY` are included in the APK. It also defaults
+`EXPO_PUBLIC_OPENROUTESERVICE_API_KEY` are included in the APK for search and
+routing. It also defaults
 `ANDROID_HOME` and `ANDROID_SDK_ROOT` to `$HOME/Library/Android/sdk` when those
 variables are not already set.
 

@@ -117,12 +117,22 @@ const RideSettingsContext = createContext<RideSettingsContextValue | null>(
   null,
 );
 
+function isMapType(value: unknown): value is RideSettings['mapType'] {
+  return value === 'standard' || value === 'outdoor';
+}
+
 function decodeSetting<K extends SettingKey>(
   key: K,
   value: string,
 ): RideSettings[K] {
   try {
     const decoded = JSON.parse(value) as unknown;
+
+    if (key === 'mapType') {
+      return (
+        isMapType(decoded) ? decoded : defaultRideSettings.mapType
+      ) as RideSettings[K];
+    }
 
     if (key === 'gpsAccuracy' && decoded === 'balanced') {
       return 'standard' as RideSettings[K];

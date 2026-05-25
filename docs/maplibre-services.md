@@ -1,7 +1,8 @@
 # MapLibre Services Setup
 
-Pelot renders native maps with MapLibre. MapLibre provides the renderer; map
-tiles/styles, place search, and bike routing come from external services.
+Pelot renders native maps with MapLibre. MapLibre provides the renderer, while
+OpenFreeMap provides map tiles/styles without an API key. Place search and bike
+routing come from external services.
 
 Required `.env` values:
 
@@ -10,16 +11,23 @@ EXPO_PUBLIC_MAPTILER_API_KEY=...
 EXPO_PUBLIC_OPENROUTESERVICE_API_KEY=...
 ```
 
-`EXPO_PUBLIC_MAPTILER_API_KEY` is used for MapTiler raster map tiles and place search.
+`EXPO_PUBLIC_MAPTILER_API_KEY` is used for MapTiler place search.
 `EXPO_PUBLIC_OPENROUTESERVICE_API_KEY` is used for cycling routes and turn
 instructions.
 
-The app builds MapLibre styles from explicit raster tile URLs. This avoids
-MapLibre Native parse warnings from style JSON sources that point at TileJSON
-URLs instead of including `tiles` directly.
+The app uses OpenFreeMap MapLibre style URLs for map display:
 
-If no MapTiler key is present, the app falls back to OpenStreetMap raster tiles
-for map rendering, but place search and route planning still require API keys.
+```sh
+https://tiles.openfreemap.org/styles/positron
+https://tiles.openfreemap.org/styles/dark
+https://tiles.openfreemap.org/styles/liberty
+https://tiles.openfreemap.org/styles/fiord
+```
+
+OpenFreeMap does not provide satellite imagery, so Pelot currently exposes
+standard and outdoor map styles only. Place search and route planning still
+require API keys. MapLibre attribution display is disabled for this app under
+the project owner's personal exemption.
 
 MapLibre is native code and cannot run in Expo Go. Rebuild the native app after
 installing or changing native map dependencies:

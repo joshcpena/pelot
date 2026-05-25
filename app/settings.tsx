@@ -117,12 +117,8 @@ function formatSplitValue(settings: RideSettings) {
 
 function getMapTypeLabel(mapType: RideSettings['mapType']) {
   switch (mapType) {
-    case 'hybrid':
-      return 'Hybrid';
     case 'outdoor':
       return 'Outdoor';
-    case 'satellite':
-      return 'Satellite';
     case 'standard':
       return 'Map';
   }
@@ -693,20 +689,6 @@ export default function SettingsScreen() {
             styles={styles}
             label="Outdoor"
             value="outdoor"
-            selectedValue={settings.mapType}
-            onSelect={(value) => update('mapType', value)}
-          />
-          <OptionButton
-            styles={styles}
-            label="Satellite"
-            value="satellite"
-            selectedValue={settings.mapType}
-            onSelect={(value) => update('mapType', value)}
-          />
-          <OptionButton
-            styles={styles}
-            label="Hybrid"
-            value="hybrid"
             selectedValue={settings.mapType}
             onSelect={(value) => update('mapType', value)}
           />

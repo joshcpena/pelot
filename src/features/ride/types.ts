@@ -192,7 +192,7 @@ export type RideSettings = {
   splitDistanceMeters: number;
   splitDurationSeconds: number;
   theme: 'system' | 'light' | 'dark';
-  mapType: 'standard' | 'outdoor' | 'satellite' | 'hybrid';
+  mapType: 'standard' | 'outdoor';
   routeProfile: RouteProfile;
   dashboardLayout: DashboardCard[];
   dashboardScreens: DashboardScreen[];
