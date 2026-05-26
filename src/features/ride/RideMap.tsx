@@ -7,6 +7,8 @@ import type {
   PlannedRoute,
   RidePoint,
   RideSettings,
+  RideStatus,
+  RouteCoordinate,
 } from './types';
 
 export function RideMap({
@@ -19,12 +21,14 @@ export function RideMap({
 }: {
   destinationOptions?: DestinationOption[];
   isNavigating?: boolean;
+  liveRideCoordinate?: RouteCoordinate | null;
   onCancelNavigation?: () => void;
   onLoadStateChange?: (isLoaded: boolean) => void;
   onLongPress?: () => void;
   points: RidePoint[];
   mapType?: RideSettings['mapType'];
   plannedRoute?: PlannedRoute | null;
+  rideStatus?: RideStatus;
   unitSystem?: RideSettings['unitSystem'];
 }) {
   const colors = useThemeColors();

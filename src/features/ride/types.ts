@@ -139,7 +139,9 @@ export type DashboardMetricId =
   | 'windLapMax'
   | 'windMin'
   | 'windLapMin'
-  | 'heartRateCurrent';
+  | 'heartRateCurrent'
+  | 'heartRateZoneBar'
+  | 'heartRateZoneGauge';
 
 export type DashboardCard = {
   id: string;
@@ -200,5 +202,6 @@ export type RideSettings = {
   riderWeightKg: number | null;
   riderHeightCm: number | null;
   riderAgeYears: number | null;
+  riderMaxHeartRateBpm: number | null;
   riderSex: RiderSex | null;
 };

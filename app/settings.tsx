@@ -23,6 +23,7 @@ import {
   type BluetoothAccessState,
   type ScannedHeartRateDevice,
 } from '../src/features/devices/heartRateMonitor';
+import { estimateMaxHeartRateBpm } from '../src/features/ride/heartRateZones';
 import { clearRecentRouteDestinations } from '../src/features/ride/routePlanning';
 
 function OptionButton<T extends string>({
@@ -96,6 +97,18 @@ function formatProfileNumber(value: number | null) {
 
 function parsePositiveNumber(value: string) {
   const parsed = Number(value);
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parsePositiveInteger(value: string) {
+  const sanitized = value.replace(/[^0-9]/g, '').slice(0, 3);
+
+  if (!sanitized) {
+    return null;
+  }
+
+  const parsed = Number(sanitized);
 
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
@@ -201,6 +214,10 @@ export default function SettingsScreen() {
           ? parsed * 2.54
           : parsed,
     );
+  }
+
+  function updateMaxHeartRate(value: string) {
+    update('riderMaxHeartRateBpm', parsePositiveInteger(value));
   }
 
   function updateSplitValue(value: string) {
@@ -392,12 +409,13 @@ export default function SettingsScreen() {
 
       <Section
         title="Rider Profile"
-        subtitle="Optional details improve calorie estimates."
+        subtitle="Optional details improve calorie estimates and heart rate zones."
         styles={styles}
       >
         <Text style={styles.muted}>
           Used for active calorie estimates with cycling MET intensity and
-          Mifflin-St Jeor resting metabolic rate.
+          Mifflin-St Jeor resting metabolic rate. Max HR defaults to 220 minus
+          age when it is left blank.
         </Text>
         <View style={styles.rowWrap}>
           <OptionButton
@@ -465,6 +483,21 @@ export default function SettingsScreen() {
               onChangeText={(value) =>
                 update('riderAgeYears', parsePositiveNumber(value))
               }
+            />
+          </View>
+          <View style={styles.profileField}>
+            <Text style={styles.label}>Max HR (bpm)</Text>
+            <TextInput
+              keyboardType="number-pad"
+              maxLength={3}
+              placeholder={
+                estimateMaxHeartRateBpm(settings.riderAgeYears)?.toString() ??
+                '185'
+              }
+              placeholderTextColor={colors.mutedText}
+              style={styles.input}
+              value={settings.riderMaxHeartRateBpm?.toString() ?? ''}
+              onChangeText={updateMaxHeartRate}
             />
           </View>
         </View>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import Svg, { Line, Path } from 'react-native-svg';
 import {
   Animated,
   Easing,
@@ -19,6 +20,14 @@ import {
   getDashboardSpanDimensions,
   type DashboardValueContext,
 } from './dashboard';
+import {
+  GARMIN_HEART_RATE_ZONES,
+  HEART_RATE_ZONE_COLORS,
+  getEffectiveMaxHeartRateBpm,
+  getHeartRateZone,
+  getHeartRateZoneLabel,
+  type HeartRateZoneResult,
+} from './heartRateZones';
 import { RideMap } from './RideMap';
 import type { DashboardCard, DashboardMetricId, RideSettings } from './types';
 
@@ -39,6 +48,14 @@ type DragState = {
 type DashboardMapTileMode = 'live' | 'slot';
 
 const ENTER_EDIT_DELAY_MS = 550;
+const GAUGE_START_ANGLE = -110;
+const GAUGE_ARC_DEGREES = 220;
+const GAUGE_CENTER_X = 56;
+const GAUGE_CENTER_Y = 63;
+const GAUGE_RADIUS = 43;
+const GAUGE_ZONE_GAP_DEGREES = 0;
+const GAUGE_NEEDLE_INNER_RADIUS = 34.5;
+const GAUGE_NEEDLE_OUTER_RADIUS = 51.5;
 
 function getOverlapArea(a: CardLayout, b: CardLayout) {
   const xOverlap = Math.max(
@@ -240,8 +257,10 @@ export function DashboardGrid({
               : undefined
           }
           points={context.routePoints}
+          liveRideCoordinate={context.currentCoordinate}
           mapType={settings.mapType}
           plannedRoute={context.plannedRoute}
+          rideStatus={context.rideStatus}
           unitSystem={settings.unitSystem}
         />
       </View>
@@ -260,18 +279,9 @@ export function DashboardGrid({
     const height = rows * rowHeight;
     const cardStyle = { width, height };
     const content =
-      card.metricId === 'map' ? (
-        renderMapContent(card, true)
-      ) : (
-        <MetricCardContent
-          colors={colors}
-          metricId={card.metricId}
-          label={metric.label}
-          columns={columns}
-          rows={rows}
-          value={metricValues?.get(card.metricId) ?? metric.getValue(context)}
-        />
-      );
+      card.metricId === 'map'
+        ? renderMapContent(card, true)
+        : renderMetricContent(card, metric.label, columns, rows);
 
     if (isEditing) {
       return (
@@ -384,16 +394,56 @@ export function DashboardGrid({
 
     const { columns } = getDashboardSpanDimensions(card.span);
 
-    return card.metricId === 'map' ? (
-      renderMapContent(card, false)
-    ) : (
+    return card.metricId === 'map'
+      ? renderMapContent(card, false)
+      : renderMetricContent(
+          card,
+          metric.label,
+          columns,
+          getDashboardSpanDimensions(card.span).rows,
+        );
+  }
+
+  function renderMetricContent(
+    card: DashboardCard,
+    label: string,
+    columns: number,
+    rows: number,
+  ) {
+    if (card.metricId === 'heartRateZoneBar') {
+      return (
+        <HeartRateZoneBarContent
+          colors={colors}
+          columns={columns}
+          context={context}
+          rows={rows}
+        />
+      );
+    }
+
+    if (card.metricId === 'heartRateZoneGauge') {
+      return (
+        <HeartRateZoneGaugeContent
+          colors={colors}
+          columns={columns}
+          context={context}
+          rows={rows}
+        />
+      );
+    }
+
+    const metric = dashboardMetricById.get(card.metricId);
+
+    return (
       <MetricCardContent
         colors={colors}
         metricId={card.metricId}
-        label={metric.label}
+        label={label}
         columns={columns}
-        rows={getDashboardSpanDimensions(card.span).rows}
-        value={metricValues?.get(card.metricId) ?? metric.getValue(context)}
+        rows={rows}
+        value={
+          metricValues?.get(card.metricId) ?? metric?.getValue(context) ?? '--'
+        }
       />
     );
   }
@@ -724,6 +774,394 @@ function DashboardEmptySpaceEditTarget({
   );
 }
 
+type HeartRateZoneRenderState =
+  | {
+      kind: 'ready';
+      result: HeartRateZoneResult;
+    }
+  | {
+      kind: 'message';
+      title: string;
+      detail: string;
+    };
+
+function getHeartRateZoneRenderState(
+  context: DashboardValueContext,
+): HeartRateZoneRenderState {
+  if (!context.settings.connectedHeartRateDevice) {
+    return {
+      kind: 'message',
+      title: 'No device',
+      detail: 'Heart rate',
+    };
+  }
+
+  if (context.heartRateStatus === 'connecting') {
+    return {
+      kind: 'message',
+      title: 'Connecting',
+      detail: context.settings.connectedHeartRateDevice.name,
+    };
+  }
+
+  if (context.heartRateStatus === 'error') {
+    return {
+      kind: 'message',
+      title: 'Error',
+      detail: context.heartRateError ?? 'Heart rate unavailable',
+    };
+  }
+
+  if (context.heartRateBpm == null) {
+    return {
+      kind: 'message',
+      title: 'Waiting',
+      detail: context.settings.connectedHeartRateDevice.name,
+    };
+  }
+
+  const maxHeartRate = getEffectiveMaxHeartRateBpm(context.settings);
+
+  if (!maxHeartRate) {
+    return {
+      kind: 'message',
+      title: 'Set max HR',
+      detail: 'Or add age',
+    };
+  }
+
+  const result = getHeartRateZone(context.heartRateBpm, maxHeartRate.bpm);
+
+  if (!result) {
+    return {
+      kind: 'message',
+      title: '--',
+      detail: 'Heart rate',
+    };
+  }
+
+  return { kind: 'ready', result };
+}
+
+function HeartRateZoneMessage({
+  colors,
+  detail,
+  title,
+}: {
+  colors: ThemeColors;
+  detail: string;
+  title: string;
+}) {
+  const styles = createStyles(colors);
+
+  return (
+    <View style={styles.hrZoneMessage}>
+      <Text
+        adjustsFontSizeToFit
+        numberOfLines={2}
+        style={styles.hrZoneMessageTitle}
+      >
+        {title}
+      </Text>
+      <Text
+        adjustsFontSizeToFit
+        numberOfLines={2}
+        style={styles.hrZoneMessageDetail}
+      >
+        {detail}
+      </Text>
+    </View>
+  );
+}
+
+function HeartRateZoneBarContent({
+  colors,
+  columns,
+  context,
+  rows,
+}: {
+  colors: ThemeColors;
+  columns: number;
+  context: DashboardValueContext;
+  rows: number;
+}) {
+  const styles = createStyles(colors);
+  const state = getHeartRateZoneRenderState(context);
+
+  if (state.kind === 'message') {
+    return (
+      <HeartRateZoneMessage
+        colors={colors}
+        detail={state.detail}
+        title={state.title}
+      />
+    );
+  }
+
+  const { result } = state;
+  const label = getHeartRateZoneLabel(result);
+  const zoneColor = getZoneColor(result);
+  const isCompact = rows <= 1;
+  const scale = Math.pow(columns * rows, 0.68);
+  const bpmFontSize = Math.min(70, Math.round(20 + scale * 10));
+  const zoneFontSize = Math.min(
+    isCompact ? 36 : 60,
+    Math.round(16 + scale * 8.5),
+  );
+  const zoneLabelMaxWidth = columns < 2 ? '54%' : '68%';
+  const readoutMinHeight = Math.min(
+    isCompact ? 44 : 116,
+    Math.max(isCompact ? 36 : 58, rows * 28),
+  );
+
+  return (
+    <View
+      style={[
+        styles.hrZoneBarContent,
+        isCompact && styles.hrZoneBarContentCompact,
+      ]}
+    >
+      <View
+        style={[
+          styles.hrZoneBarHeader,
+          isCompact && styles.hrZoneBarHeaderCompact,
+        ]}
+      >
+        <Text style={styles.hrZoneKicker}>HR Zone</Text>
+      </View>
+      <View
+        style={[
+          styles.hrZoneBarReadout,
+          { minHeight: readoutMinHeight },
+          isCompact && styles.hrZoneBarReadoutCompact,
+        ]}
+      >
+        <View style={styles.hrZoneBpmRow}>
+          <Text
+            adjustsFontSizeToFit
+            numberOfLines={1}
+            style={[
+              styles.hrZoneBpm,
+              { color: zoneColor, fontSize: bpmFontSize },
+            ]}
+          >
+            {result.bpm}
+          </Text>
+        </View>
+        <Text
+          adjustsFontSizeToFit
+          numberOfLines={1}
+          style={[
+            styles.hrZoneLabel,
+            {
+              color: zoneColor,
+              fontSize: zoneFontSize,
+              maxWidth: zoneLabelMaxWidth,
+            },
+          ]}
+        >
+          {label}
+        </Text>
+      </View>
+      <HeartRateZoneTrack
+        colors={colors}
+        isCompact={isCompact}
+        markerProgress={result.markerProgress}
+      />
+    </View>
+  );
+}
+
+function HeartRateZoneTrack({
+  colors,
+  isCompact,
+  markerProgress,
+}: {
+  colors: ThemeColors;
+  isCompact: boolean;
+  markerProgress: number;
+}) {
+  const styles = createStyles(colors);
+
+  return (
+    <View
+      style={[
+        styles.hrZoneTrackWrap,
+        isCompact && styles.hrZoneTrackWrapCompact,
+      ]}
+    >
+      <View style={styles.hrZoneTrack}>
+        {HEART_RATE_ZONE_COLORS.map((color, index) => (
+          <View
+            key={color}
+            style={[
+              styles.hrZoneTrackSegment,
+              { backgroundColor: color },
+              index > 0 && styles.hrZoneTrackSegmentGap,
+            ]}
+          />
+        ))}
+      </View>
+      <View
+        pointerEvents="none"
+        style={[
+          styles.hrZoneBarMarker,
+          {
+            left: `${markerProgress * 100}%`,
+          },
+        ]}
+      />
+    </View>
+  );
+}
+
+function HeartRateZoneGaugeContent({
+  colors,
+  columns,
+  context,
+  rows,
+}: {
+  colors: ThemeColors;
+  columns: number;
+  context: DashboardValueContext;
+  rows: number;
+}) {
+  const styles = createStyles(colors);
+  const state = getHeartRateZoneRenderState(context);
+
+  if (state.kind === 'message') {
+    return (
+      <HeartRateZoneMessage
+        colors={colors}
+        detail={state.detail}
+        title={state.title}
+      />
+    );
+  }
+
+  const { result } = state;
+  const label = getHeartRateZoneLabel(result);
+  const zoneColor = getZoneColor(result);
+  const needleAngle =
+    GAUGE_START_ANGLE + result.markerProgress * GAUGE_ARC_DEGREES;
+  const needleStart = getGaugePoint(needleAngle, GAUGE_NEEDLE_INNER_RADIUS);
+  const needleEnd = getGaugePoint(needleAngle, GAUGE_NEEDLE_OUTER_RADIUS);
+  const scale = Math.pow(columns * rows, 0.72);
+  const bpmFontSize = Math.min(76, Math.round(18 + scale * 9.8));
+  const gaugeVisualHeight = Math.min(230, Math.max(86, rows * 49));
+  const gaugeLabelFontSize = Math.min(42, Math.round(13 + scale * 3.7));
+
+  return (
+    <View style={styles.hrZoneGaugeContent}>
+      <View style={styles.hrZoneGaugeHeader}>
+        <Text style={styles.hrZoneKicker}>HR Zone</Text>
+      </View>
+      <View style={styles.hrZoneGaugeStack}>
+        <View style={[styles.hrZoneGaugeVisual, { height: gaugeVisualHeight }]}>
+          <Svg
+            height="100%"
+            viewBox="0 0 112 92"
+            width="100%"
+            preserveAspectRatio="xMidYMid meet"
+          >
+            <Path
+              d={getGaugeArcPath(GAUGE_START_ANGLE, GAUGE_START_ANGLE + 220)}
+              fill="none"
+              stroke={colors.border}
+              strokeLinecap="butt"
+              strokeWidth={13}
+            />
+            {GARMIN_HEART_RATE_ZONES.map((zoneDefinition, index) => {
+              const zoneArcStart =
+                GAUGE_START_ANGLE +
+                index * (GAUGE_ARC_DEGREES / GARMIN_HEART_RATE_ZONES.length) +
+                GAUGE_ZONE_GAP_DEGREES / 2;
+              const zoneArcEnd =
+                GAUGE_START_ANGLE +
+                (index + 1) *
+                  (GAUGE_ARC_DEGREES / GARMIN_HEART_RATE_ZONES.length) -
+                GAUGE_ZONE_GAP_DEGREES / 2;
+
+              return (
+                <Path
+                  key={zoneDefinition.zone}
+                  d={getGaugeArcPath(zoneArcStart, zoneArcEnd)}
+                  fill="none"
+                  stroke={HEART_RATE_ZONE_COLORS[index]}
+                  strokeLinecap="butt"
+                  strokeWidth={13}
+                />
+              );
+            })}
+            <Line
+              stroke="#000"
+              strokeLinecap="butt"
+              strokeWidth={3}
+              x1={needleStart.x}
+              x2={needleEnd.x}
+              y1={needleStart.y}
+              y2={needleEnd.y}
+            />
+          </Svg>
+          <View style={styles.hrZoneGaugeReadout}>
+            <Text
+              adjustsFontSizeToFit
+              numberOfLines={1}
+              style={[
+                styles.hrZoneBpm,
+                { color: zoneColor, fontSize: bpmFontSize },
+              ]}
+            >
+              {result.bpm}
+            </Text>
+          </View>
+        </View>
+        <Text
+          adjustsFontSizeToFit
+          numberOfLines={1}
+          style={[
+            styles.hrZoneGaugeLabel,
+            { color: zoneColor, fontSize: gaugeLabelFontSize },
+          ]}
+        >
+          {label}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function getZoneColor(result: HeartRateZoneResult) {
+  if (!result.zone) {
+    return result.state === 'below'
+      ? HEART_RATE_ZONE_COLORS[0]
+      : HEART_RATE_ZONE_COLORS[HEART_RATE_ZONE_COLORS.length - 1];
+  }
+
+  return HEART_RATE_ZONE_COLORS[result.zone.zone - 1];
+}
+
+function getGaugePoint(angle: number, radius: number) {
+  const radians = ((angle - 90) * Math.PI) / 180;
+
+  return {
+    x: GAUGE_CENTER_X + radius * Math.cos(radians),
+    y: GAUGE_CENTER_Y + radius * Math.sin(radians),
+  };
+}
+
+function getGaugeArcPath(startAngle: number, endAngle: number) {
+  const start = getGaugePoint(startAngle, GAUGE_RADIUS);
+  const end = getGaugePoint(endAngle, GAUGE_RADIUS);
+  const largeArcFlag = endAngle - startAngle > 180 ? 1 : 0;
+
+  return [
+    `M ${start.x.toFixed(2)} ${start.y.toFixed(2)}`,
+    `A ${GAUGE_RADIUS} ${GAUGE_RADIUS} 0 ${largeArcFlag} 1`,
+    `${end.x.toFixed(2)} ${end.y.toFixed(2)}`,
+  ].join(' ');
+}
+
 function MetricCardContent({
   colors,
   columns,
@@ -853,6 +1291,173 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    hrZoneMessage: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 8,
+    },
+    hrZoneMessageTitle: {
+      width: '100%',
+      color: colors.primaryText,
+      fontSize: 24,
+      fontWeight: '900',
+      includeFontPadding: false,
+      textAlign: 'center',
+    },
+    hrZoneMessageDetail: {
+      width: '100%',
+      marginTop: 5,
+      color: colors.mutedText,
+      fontSize: 11,
+      fontWeight: '800',
+      includeFontPadding: false,
+      letterSpacing: 0.4,
+      textAlign: 'center',
+      textTransform: 'uppercase',
+    },
+    hrZoneBarContent: {
+      flex: 1,
+      position: 'relative',
+      justifyContent: 'center',
+      gap: 7,
+      padding: 10,
+    },
+    hrZoneBarContentCompact: {
+      justifyContent: 'flex-start',
+      gap: 0,
+      paddingTop: 0,
+      paddingBottom: 0,
+    },
+    hrZoneBarHeader: {
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    hrZoneBarHeaderCompact: {
+      position: 'absolute',
+      top: 2,
+      right: 0,
+      left: 0,
+      zIndex: 2,
+    },
+    hrZoneGaugeHeader: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 2,
+    },
+    hrZoneKicker: {
+      color: colors.mutedText,
+      fontSize: 10,
+      fontWeight: '900',
+      includeFontPadding: false,
+      letterSpacing: 0.8,
+      textTransform: 'uppercase',
+    },
+    hrZoneBarReadout: {
+      position: 'relative',
+      minHeight: 54,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    hrZoneBarReadoutCompact: {
+      position: 'absolute',
+      top: 12,
+      right: 0,
+      left: 0,
+      minHeight: 34,
+    },
+    hrZoneBpmRow: {
+      position: 'absolute',
+      left: 0,
+      maxWidth: '45%',
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      justifyContent: 'flex-start',
+      gap: 4,
+    },
+    hrZoneBpm: {
+      flexShrink: 1,
+      fontWeight: '900',
+      includeFontPadding: false,
+      letterSpacing: 0,
+    },
+    hrZoneLabel: {
+      alignSelf: 'center',
+      fontWeight: '900',
+      includeFontPadding: false,
+      letterSpacing: 0,
+      textAlign: 'center',
+    },
+    hrZoneTrackWrap: {
+      position: 'relative',
+      paddingTop: 11,
+    },
+    hrZoneTrackWrapCompact: {
+      position: 'absolute',
+      right: 0,
+      bottom: 0,
+      left: 0,
+      paddingTop: 7,
+    },
+    hrZoneTrack: {
+      height: 12,
+      flexDirection: 'row',
+      overflow: 'hidden',
+      borderRadius: 4,
+      backgroundColor: colors.border,
+    },
+    hrZoneTrackSegment: {
+      flex: 1,
+    },
+    hrZoneTrackSegmentGap: {
+      marginLeft: 2,
+    },
+    hrZoneBarMarker: {
+      position: 'absolute',
+      top: 4,
+      width: 0,
+      height: 0,
+      marginLeft: -6,
+      borderLeftWidth: 6,
+      borderRightWidth: 6,
+      borderTopWidth: 11,
+      borderTopColor: '#000',
+      borderLeftColor: 'transparent',
+      borderRightColor: 'transparent',
+    },
+    hrZoneGaugeContent: {
+      flex: 1,
+      alignItems: 'center',
+      padding: 8,
+    },
+    hrZoneGaugeStack: {
+      flex: 1,
+      width: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 5,
+    },
+    hrZoneGaugeVisual: {
+      width: '100%',
+      position: 'relative',
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    hrZoneGaugeReadout: {
+      position: 'absolute',
+      top: '36%',
+      right: 0,
+      left: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    hrZoneGaugeLabel: {
+      fontWeight: '900',
+      includeFontPadding: false,
+      letterSpacing: 0,
+      textAlign: 'center',
     },
     editSlot: {
       backgroundColor: colors.background,

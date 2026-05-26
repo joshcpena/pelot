@@ -38,6 +38,7 @@ export const defaultRideSettings: RideSettings = {
   riderWeightKg: null,
   riderHeightCm: null,
   riderAgeYears: null,
+  riderMaxHeartRateBpm: null,
   riderSex: null,
 };
 

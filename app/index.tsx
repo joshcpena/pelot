@@ -58,6 +58,7 @@ import type {
   PlannedRoute,
   RidePoint,
   RideSettings,
+  RideStatus,
   RouteCoordinate,
 } from '../src/features/ride/types';
 import { useForegroundRideRecorder } from '../src/features/ride/useForegroundRideRecorder';
@@ -130,6 +131,11 @@ const weatherMetricIds = new Set<DashboardMetricId>([
   'windLapMax',
   'windMin',
   'windLapMin',
+]);
+const heartRateMetricIds = new Set<DashboardMetricId>([
+  'heartRateCurrent',
+  'heartRateZoneBar',
+  'heartRateZoneGauge',
 ]);
 
 type DashboardMapRect = {
@@ -393,8 +399,8 @@ export default function HomeScreen() {
   const dashboardRuntimeLayout = dashboardSwipeTargetScreen
     ? [...displayedLayout, ...dashboardSwipeTargetScreen.layout]
     : displayedLayout;
-  const shouldConnectHeartRate = dashboardRuntimeLayout.some(
-    (card) => card.metricId === 'heartRateCurrent',
+  const shouldConnectHeartRate = dashboardRuntimeLayout.some((card) =>
+    heartRateMetricIds.has(card.metricId),
   );
   const shouldReadDeviceBattery = dashboardRuntimeLayout.some(
     (card) => card.metricId === 'deviceBatteryLevel',
@@ -430,9 +436,11 @@ export default function HomeScreen() {
     metrics: recorder.metrics,
     settings,
     routePoints: recorder.routePoints,
+    currentCoordinate: recorder.currentCoordinate,
     plannedRoute,
     destinationOptions,
     isNavigating: recorder.status === 'recording' && plannedRoute != null,
+    rideStatus: recorder.status,
     now,
     heartRateBpm: heartRate.heartRateBpm,
     heartRateStatus: heartRate.status,
@@ -681,15 +689,19 @@ export default function HomeScreen() {
     }
 
     const latestPoint = recorder.routePoints.at(-1);
+    const currentCoordinate =
+      recorder.currentCoordinate ??
+      (latestPoint
+        ? {
+            latitude: latestPoint.latitude,
+            longitude: latestPoint.longitude,
+          }
+        : null);
 
-    if (!latestPoint || plannedRoute.coordinates.length < 2) {
+    if (!currentCoordinate || plannedRoute.coordinates.length < 2) {
       return;
     }
 
-    const currentCoordinate = {
-      latitude: latestPoint.latitude,
-      longitude: latestPoint.longitude,
-    };
     const distanceFromRoute = distanceToRouteMeters(
       currentCoordinate,
       plannedRoute.coordinates,
@@ -730,6 +742,7 @@ export default function HomeScreen() {
       });
   }, [
     plannedRoute,
+    recorder.currentCoordinate,
     recorder.routePoints,
     recorder.status,
     selectedDestination,
@@ -1019,7 +1032,16 @@ export default function HomeScreen() {
       throw new Error('Location permission is required to plan a route.');
     }
 
-    const lastRidePoint = recorder.routePoints.at(-1);
+    const shouldUseLastRidePoint =
+      recorder.status === 'recording' || recorder.status === 'paused';
+    const lastRidePoint = shouldUseLastRidePoint
+      ? recorder.routePoints.at(-1)
+      : null;
+
+    if (shouldUseLastRidePoint && recorder.currentCoordinate) {
+      lastRouteOriginRef.current = recorder.currentCoordinate;
+      return recorder.currentCoordinate;
+    }
 
     if (lastRidePoint) {
       const origin = {
@@ -1049,7 +1071,7 @@ export default function HomeScreen() {
     }
 
     const position = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Low,
+      accuracy: Location.Accuracy.High,
     });
 
     const origin = {
@@ -1620,6 +1642,8 @@ export default function HomeScreen() {
                   }
                   plannedRoute={plannedRoute}
                   points={recorder.routePoints}
+                  liveRideCoordinate={recorder.currentCoordinate}
+                  rideStatus={recorder.status}
                   targetRect={targetDashboardMapRect}
                   unitSystem={settings.unitSystem}
                 />
@@ -2087,6 +2111,8 @@ function SharedDashboardMapLayer({
   onLongPress,
   plannedRoute,
   points,
+  liveRideCoordinate,
+  rideStatus,
   targetRect,
   unitSystem,
 }: {
@@ -2105,6 +2131,8 @@ function SharedDashboardMapLayer({
   onLongPress?: () => void;
   plannedRoute: PlannedRoute | null;
   points: RidePoint[];
+  liveRideCoordinate: RouteCoordinate | null;
+  rideStatus: RideStatus;
   targetRect: DashboardMapRect | null;
   unitSystem: RideSettings['unitSystem'];
 }) {
@@ -2166,6 +2194,8 @@ function SharedDashboardMapLayer({
         onLongPress={onLongPress}
         plannedRoute={plannedRoute}
         points={points}
+        liveRideCoordinate={liveRideCoordinate}
+        rideStatus={rideStatus}
         unitSystem={unitSystem}
       />
     </Animated.View>

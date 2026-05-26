@@ -1,7 +1,7 @@
 {
   "name": "pelot",
   "version": "0.0.2",
-  "main": "expo-router/entry",
+  "main": "index.js",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
@@ -40,6 +40,7 @@
     "react-native-reanimated-dnd": "^2.0.0",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.25.2",
+    "react-native-svg": "15.15.4",
     "react-native-web": "~0.21.0",
     "react-native-worklets": "^0.8.3"
   },

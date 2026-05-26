@@ -6,6 +6,10 @@ import { getActiveRideId, insertRidePoints } from './rideStorage';
 import type { RideSettings } from './types';
 
 export const BACKGROUND_RIDE_LOCATION_TASK = 'pelot-background-ride-location';
+const STANDARD_BACKGROUND_DISTANCE_INTERVAL_METERS = 10;
+const BEST_BACKGROUND_DISTANCE_INTERVAL_METERS = 5;
+const STANDARD_BACKGROUND_TIME_INTERVAL_MS = 5000;
+const BEST_BACKGROUND_TIME_INTERVAL_MS = 1000;
 
 function toRidePoint(location: Location.LocationObject) {
   return {
@@ -65,9 +69,11 @@ export async function startBackgroundRideRecording(settings: RideSettings) {
   await Location.startLocationUpdatesAsync(BACKGROUND_RIDE_LOCATION_TASK, {
     accuracy: isBestAccuracy
       ? Location.Accuracy.BestForNavigation
-      : Location.Accuracy.Balanced,
+      : Location.Accuracy.High,
     activityType: Location.ActivityType.Fitness,
-    distanceInterval: isBestAccuracy ? 5 : 25,
+    distanceInterval: isBestAccuracy
+      ? BEST_BACKGROUND_DISTANCE_INTERVAL_METERS
+      : STANDARD_BACKGROUND_DISTANCE_INTERVAL_METERS,
     foregroundService: {
       notificationTitle: 'Pelot is recording your ride',
       notificationBody: 'Location is being used to keep tracking your route.',
@@ -75,7 +81,9 @@ export async function startBackgroundRideRecording(settings: RideSettings) {
     },
     pausesUpdatesAutomatically: false,
     showsBackgroundLocationIndicator: true,
-    timeInterval: isBestAccuracy ? 1000 : 10000,
+    timeInterval: isBestAccuracy
+      ? BEST_BACKGROUND_TIME_INTERVAL_MS
+      : STANDARD_BACKGROUND_TIME_INTERVAL_MS,
   });
 
   return true;

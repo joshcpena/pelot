@@ -23,7 +23,13 @@ import {
   loadRidePoints,
   setActiveRideId,
 } from './rideStorage';
-import type { RideMetrics, RidePoint, RideSettings, RideStatus } from './types';
+import type {
+  RideMetrics,
+  RidePoint,
+  RideSettings,
+  RideStatus,
+  RouteCoordinate,
+} from './types';
 
 const KEEP_AWAKE_TAG = 'pelot-active-ride';
 const STOPPED_SPEED_MPS = 0.75;
@@ -31,6 +37,8 @@ const STANDARD_GPS_DISTANCE_INTERVAL_METERS = 10;
 const BEST_GPS_DISTANCE_INTERVAL_METERS = 5;
 const STANDARD_GPS_TIME_INTERVAL_MS = 5000;
 const BEST_GPS_TIME_INTERVAL_MS = 1000;
+const LOCATION_WATCH_RECOVERY_INTERVAL_MS = 5000;
+const LOCATION_WATCH_STALE_MS = 30000;
 const BAROMETER_UPDATE_INTERVAL_MS = 5000;
 const RESUME_POINT_SYNC_DELAY_MS = 1500;
 const BACKGROUND_LOCATION_UNAVAILABLE_ERROR =
@@ -84,6 +92,13 @@ function toRidePoint(
   };
 }
 
+function toRouteCoordinate(location: Location.LocationObject): RouteCoordinate {
+  return {
+    latitude: location.coords.latitude,
+    longitude: location.coords.longitude,
+  };
+}
+
 function getRidePointKey(point: RidePoint) {
   return [point.recordedAt, point.latitude, point.longitude].join(':');
 }
@@ -119,7 +134,7 @@ function areRidePointListsEqual(
 function getLocationAccuracy(settings: RideSettings) {
   return settings.gpsAccuracy === 'best'
     ? Location.Accuracy.BestForNavigation
-    : Location.Accuracy.Balanced;
+    : Location.Accuracy.High;
 }
 
 function getLocationDistanceInterval(settings: RideSettings) {
@@ -160,6 +175,8 @@ export function useForegroundRideRecorder(settings: RideSettings) {
   const [status, setStatus] = useState<RideStatus>('idle');
   const [metrics, setMetrics] = useState<RideMetrics>(initialMetrics);
   const [routePoints, setRoutePoints] = useState<RidePoint[]>([]);
+  const [currentCoordinate, setCurrentCoordinate] =
+    useState<RouteCoordinate | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isAutoPaused, setIsAutoPaused] = useState(false);
 
@@ -173,6 +190,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
   const isAutoPausedRef = useRef(false);
   const rideIdRef = useRef<string | null>(null);
   const watchRef = useRef<Location.LocationSubscription | null>(null);
+  const isEnsuringLocationWatchRef = useRef(false);
   const isBackgroundRecordingRef = useRef(false);
   const barometerWatchRef = useRef<{ remove: () => void } | null>(null);
   const baselinePressureRef = useRef<number | null>(null);
@@ -185,6 +203,9 @@ export function useForegroundRideRecorder(settings: RideSettings) {
   const resumePointSyncTimeoutRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+  const locationWatchStartedAtRef = useRef<number | null>(null);
+  const lastLocationUpdateAtRef = useRef<number | null>(null);
+  const lastLocationWatchRecoveryAtRef = useRef(0);
   const shouldSyncBeforeNextLocationRef = useRef(false);
   const appStateTransitionIdRef = useRef(0);
 
@@ -249,6 +270,8 @@ export function useForegroundRideRecorder(settings: RideSettings) {
   async function stopWatchingLocation() {
     watchRef.current?.remove();
     watchRef.current = null;
+    locationWatchStartedAtRef.current = null;
+    lastLocationUpdateAtRef.current = null;
   }
 
   async function startWatchingBarometer() {
@@ -340,6 +363,8 @@ export function useForegroundRideRecorder(settings: RideSettings) {
       ) {
         markLap();
       }
+
+      ensureForegroundLocationWatch();
     }, 1000);
   }
 
@@ -366,6 +391,8 @@ export function useForegroundRideRecorder(settings: RideSettings) {
         timeInterval: getLocationTimeInterval(currentSettings),
       },
       async (location) => {
+        lastLocationUpdateAtRef.current = Date.now();
+        setCurrentCoordinate(toRouteCoordinate(location));
         const activeSettings = settingsRef.current;
 
         if (statusRef.current !== 'recording' || rideIdRef.current == null) {
@@ -462,6 +489,50 @@ export function useForegroundRideRecorder(settings: RideSettings) {
         await insertRidePoint(rideIdRef.current, point, 'foreground-gps');
       },
     );
+    locationWatchStartedAtRef.current = Date.now();
+    lastLocationUpdateAtRef.current = Date.now();
+  }
+
+  function ensureForegroundLocationWatch() {
+    if (
+      statusRef.current !== 'recording' ||
+      AppState.currentState !== 'active' ||
+      isEnsuringLocationWatchRef.current
+    ) {
+      return;
+    }
+
+    const now = Date.now();
+    const lastLocationActivity =
+      lastLocationUpdateAtRef.current ?? locationWatchStartedAtRef.current;
+    const isWatchMissing = watchRef.current == null;
+    const isWatchStale =
+      lastLocationActivity != null &&
+      now - lastLocationActivity > LOCATION_WATCH_STALE_MS;
+
+    if (!isWatchMissing && !isWatchStale) {
+      return;
+    }
+
+    if (
+      now - lastLocationWatchRecoveryAtRef.current <
+      LOCATION_WATCH_RECOVERY_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    lastLocationWatchRecoveryAtRef.current = now;
+    isEnsuringLocationWatchRef.current = true;
+
+    startWatchingLocation()
+      .catch(() => {
+        setError(
+          'Current location is unavailable. Make sure that location services are enabled.',
+        );
+      })
+      .finally(() => {
+        isEnsuringLocationWatchRef.current = false;
+      });
   }
 
   async function startBackgroundRecordingIfNeeded() {
@@ -604,11 +675,6 @@ export function useForegroundRideRecorder(settings: RideSettings) {
       if (!isCurrentTransition()) {
         return;
       }
-      await stopBackgroundRecordingIfNeeded();
-      await syncPersistedRidePoints();
-      if (!isCurrentTransition()) {
-        return;
-      }
       scheduleResumePointSync();
       return;
     }
@@ -665,6 +731,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
       ),
     );
     updateRoutePoints([]);
+    setCurrentCoordinate(null);
     isAutoPausedRef.current = false;
     setIsAutoPaused(false);
     setRideStatus('recording');
@@ -674,6 +741,12 @@ export function useForegroundRideRecorder(settings: RideSettings) {
 
     if (backgroundPermission.status !== Location.PermissionStatus.GRANTED) {
       setError(BACKGROUND_LOCATION_START_WARNING);
+    } else {
+      const backgroundStarted = await startBackgroundRecordingIfNeeded();
+
+      if (!backgroundStarted) {
+        setError(BACKGROUND_LOCATION_UNAVAILABLE_ERROR);
+      }
     }
 
     if (settings.keepAwakeDuringRide) {
@@ -757,6 +830,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
     setIsAutoPaused(false);
     setRideStatus('stopped');
     rideIdRef.current = null;
+    setCurrentCoordinate(null);
   }
 
   useEffect(() => {
@@ -779,6 +853,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
     status,
     metrics,
     routePoints,
+    currentCoordinate,
     error,
     isAutoPaused,
     startRide,

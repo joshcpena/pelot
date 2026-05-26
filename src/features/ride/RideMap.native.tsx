@@ -34,6 +34,7 @@ import type {
   PlannedRouteStep,
   RidePoint,
   RideSettings,
+  RideStatus,
   RouteCoordinate,
 } from './types';
 
@@ -48,6 +49,8 @@ const EMPTY_LINE: FeatureCollection<LineString> = {
 };
 
 const MANEUVER_COMPLETE_DISTANCE_METERS = 35;
+const PREVIEW_LOCATION_DISTANCE_INTERVAL_METERS = 10;
+const PREVIEW_LOCATION_TIME_INTERVAL_MS = 5000;
 const SEARCH_RESULTS_FIT_RADIUS_METERS = 5000;
 const NAVIGATION_CAMERA_PADDING = { top: 118, right: 0, bottom: 0, left: 0 };
 const COMPASS_NEEDLE_ICON = require('../../../assets/compass-needle.png');
@@ -59,8 +62,10 @@ type RideMapProps = {
   onLoadStateChange?: (isLoaded: boolean) => void;
   onLongPress?: () => void;
   points: RidePoint[];
+  liveRideCoordinate?: RouteCoordinate | null;
   mapType: RideSettings['mapType'];
   plannedRoute?: PlannedRoute | null;
+  rideStatus?: RideStatus;
   unitSystem: RideSettings['unitSystem'];
 };
 
@@ -339,8 +344,10 @@ function RideMapComponent({
   onLoadStateChange,
   onLongPress,
   points,
+  liveRideCoordinate,
   mapType,
   plannedRoute,
+  rideStatus,
   unitSystem,
 }: RideMapProps) {
   const cameraRef = useRef<CameraRef | null>(null);
@@ -388,8 +395,16 @@ function RideMapComponent({
         : null,
     [lastLatitude, lastLongitude],
   );
-  const currentMarkerCoordinate = lastCoordinate ?? currentCoordinate;
-  const mapCenter = lastCoordinate ?? currentCoordinate ?? DEFAULT_COORDINATE;
+  const hasRideLocation = lastCoordinate != null;
+  const shouldUseRideLocation =
+    rideStatus == null
+      ? hasRideLocation
+      : rideStatus === 'recording' || rideStatus === 'paused';
+  const rideCoordinate = shouldUseRideLocation
+    ? (liveRideCoordinate ?? lastCoordinate)
+    : null;
+  const currentMarkerCoordinate = rideCoordinate ?? currentCoordinate;
+  const mapCenter = rideCoordinate ?? currentCoordinate ?? DEFAULT_COORDINATE;
   const mapHeading = getHeading(points);
   const mapStyle = useMemo(
     () => getRideMapStyle(mapType, resolvedTheme),
@@ -407,6 +422,15 @@ function RideMapComponent({
   const plannedRouteFeature = useMemo(
     () => lineFeature('planned-route', plannedCoordinates ?? []),
     [plannedCoordinates],
+  );
+  const wholeRouteCoordinates = useMemo(
+    () =>
+      plannedCoordinates && plannedCoordinates.length > 1
+        ? plannedCoordinates
+        : coordinates.length > 1
+          ? coordinates
+          : [],
+    [coordinates, plannedCoordinates],
   );
   const activeNavigationStep = useMemo(
     () =>
@@ -435,6 +459,7 @@ function RideMapComponent({
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
+      let locationSubscription: Location.LocationSubscription | null = null;
 
       async function loadCurrentLocation() {
         const permission = await Location.getForegroundPermissionsAsync();
@@ -454,21 +479,38 @@ function RideMapComponent({
           setCurrentCoordinate(toCoordinate(lastKnownPosition.coords));
         }
 
-        const position = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-
-        if (isActive) {
-          setCurrentCoordinate(toCoordinate(position.coords));
+        if (!isActive || shouldUseRideLocation) {
+          return;
         }
+
+        const nextSubscription = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.High,
+            distanceInterval: PREVIEW_LOCATION_DISTANCE_INTERVAL_METERS,
+            timeInterval: PREVIEW_LOCATION_TIME_INTERVAL_MS,
+          },
+          (location) => {
+            if (isActive) {
+              setCurrentCoordinate(toCoordinate(location.coords));
+            }
+          },
+        );
+
+        if (!isActive) {
+          nextSubscription.remove();
+          return;
+        }
+
+        locationSubscription = nextSubscription;
       }
 
       loadCurrentLocation().catch(() => undefined);
 
       return () => {
         isActive = false;
+        locationSubscription?.remove();
       };
-    }, []),
+    }, [shouldUseRideLocation]),
   );
 
   useEffect(() => {
@@ -479,15 +521,14 @@ function RideMapComponent({
     if (
       !isCameraCentered ||
       !isStyleLoaded ||
-      lastLatitude === undefined ||
-      lastLongitude === undefined
+      !rideCoordinate
     ) {
       return;
     }
 
     isProgrammaticCameraMoveRef.current = true;
     cameraRef.current?.setStop({
-      center: [lastLongitude, lastLatitude],
+      center: toLngLat(rideCoordinate),
       bearing: isTopDownView ? 0 : mapHeading,
       pitch: isTopDownView ? 0 : isNavigating ? 60 : 45,
       padding: isNavigating ? NAVIGATION_CAMERA_PADDING : undefined,
@@ -503,16 +544,14 @@ function RideMapComponent({
     isNavigating,
     isStyleLoaded,
     isTopDownView,
-    lastLatitude,
-    lastLongitude,
     mapHeading,
+    rideCoordinate,
   ]);
 
   useEffect(() => {
     if (
       !isStyleLoaded ||
-      lastLatitude !== undefined ||
-      lastLongitude !== undefined ||
+      rideCoordinate ||
       !currentCoordinate
     ) {
       return;
@@ -524,7 +563,7 @@ function RideMapComponent({
       zoom: 15,
       duration: 500,
     });
-  }, [currentCoordinate, isStyleLoaded, lastLatitude, lastLongitude]);
+  }, [currentCoordinate, isStyleLoaded, rideCoordinate]);
 
   useEffect(() => {
     if (
@@ -597,9 +636,9 @@ function RideMapComponent({
     cameraRef.current?.setStop({
       center: toLngLat(mapCenter),
       bearing: topDownView ? 0 : mapHeading,
-      pitch: topDownView ? 0 : lastCoordinate ? (isNavigating ? 60 : 45) : 0,
+      pitch: topDownView ? 0 : rideCoordinate ? (isNavigating ? 60 : 45) : 0,
       padding: isNavigating ? NAVIGATION_CAMERA_PADDING : undefined,
-      zoom: lastCoordinate ? 17 : 15,
+      zoom: rideCoordinate ? 17 : 15,
       duration: 500,
       easing: 'ease',
     });
@@ -632,15 +671,11 @@ function RideMapComponent({
   }
 
   function showWholeRoute() {
-    const routeCoordinates =
-      coordinates.length > 1 ? coordinates : (plannedCoordinates ?? []);
-
-    if (routeCoordinates.length < 2) {
-      setMapCameraCentered();
+    if (wholeRouteCoordinates.length < 2) {
       return;
     }
 
-    const bounds = getBounds(routeCoordinates);
+    const bounds = getBounds(wholeRouteCoordinates);
 
     if (bounds) {
       cameraRef.current?.fitBounds(bounds, {
@@ -661,7 +696,7 @@ function RideMapComponent({
         style={styles.map}
         mapStyle={mapStyle}
         attribution={false}
-        compass
+        compass={false}
         logo={false}
         preferredFramesPerSecond={30}
         onLongPress={onLongPress}
@@ -786,17 +821,19 @@ function RideMapComponent({
             <Text style={styles.mapActionIcon}>⌖</Text>
           )}
         </Pressable>
-        <Pressable
-          accessibilityLabel="Show whole route"
-          hitSlop={8}
-          style={({ pressed }) => [
-            styles.mapActionButton,
-            pressed && styles.mapActionButtonPressed,
-          ]}
-          onPress={showWholeRoute}
-        >
-          <Text style={styles.mapActionIcon}>⛶</Text>
-        </Pressable>
+        {wholeRouteCoordinates.length > 1 ? (
+          <Pressable
+            accessibilityLabel="Show whole route"
+            hitSlop={8}
+            style={({ pressed }) => [
+              styles.mapActionButton,
+              pressed && styles.mapActionButtonPressed,
+            ]}
+            onPress={showWholeRoute}
+          >
+            <Text style={styles.mapActionIcon}>⛶</Text>
+          </Pressable>
+        ) : null}
         {plannedRoute && onCancelNavigation ? (
           <Pressable
             accessibilityLabel={
@@ -826,8 +863,10 @@ function areRideMapPropsEqual(previous: RideMapProps, next: RideMapProps) {
     previous.onLoadStateChange === next.onLoadStateChange &&
     Boolean(previous.onLongPress) === Boolean(next.onLongPress) &&
     previous.points === next.points &&
+    previous.liveRideCoordinate === next.liveRideCoordinate &&
     previous.mapType === next.mapType &&
     previous.plannedRoute === next.plannedRoute &&
+    previous.rideStatus === next.rideStatus &&
     previous.unitSystem === next.unitSystem
   );
 }

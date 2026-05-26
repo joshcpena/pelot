@@ -7,6 +7,11 @@ import {
   formatSpeed,
   formatTimeOfDay,
 } from './metrics';
+import {
+  getEffectiveMaxHeartRateBpm,
+  getHeartRateZone,
+  getHeartRateZoneLabel,
+} from './heartRateZones';
 import type {
   DashboardCard,
   DashboardScreen,
@@ -17,6 +22,8 @@ import type {
   RideMetrics,
   RidePoint,
   RideSettings,
+  RideStatus,
+  RouteCoordinate,
 } from './types';
 import type { WeatherSample } from './weather';
 
@@ -36,9 +43,11 @@ export type DashboardValueContext = {
   metrics: RideMetrics;
   settings: RideSettings;
   routePoints: RidePoint[];
+  currentCoordinate: RouteCoordinate | null;
   plannedRoute: PlannedRoute | null;
   destinationOptions: DestinationOption[];
   isNavigating: boolean;
+  rideStatus: RideStatus;
   now: number | null;
   heartRateBpm: number | null;
   heartRateStatus:
@@ -186,6 +195,24 @@ export const defaultDashboardScreens: DashboardScreen[] = [
 ];
 
 const metricSpans = metricDashboardSpans;
+const heartRateZoneBarSpans: DashboardCardSpan[] = [
+  '3x1',
+  '1.5x2',
+  '2x2',
+  '3x2',
+  '3x3',
+  '3x4',
+  '3x5',
+];
+const heartRateZoneGaugeSpans: DashboardCardSpan[] = [
+  '1.5x2',
+  '2x2',
+  '3x2',
+  '2x3',
+  '3x3',
+  '3x4',
+  '3x5',
+];
 const ELEVATION_CHANGE_THRESHOLD_METERS = 3;
 const KPH_TO_MPH = 0.621371;
 
@@ -281,6 +308,56 @@ function formatGrade(value: number | null) {
 
 function formatBatteryLevel(level: number | null) {
   return level == null ? '--' : `${Math.round(level * 100)}%`;
+}
+
+function formatCurrentHeartRate({
+  heartRateBpm,
+  heartRateStatus,
+  heartRateError,
+  settings,
+}: DashboardValueContext) {
+  if (!settings.connectedHeartRateDevice) {
+    return 'No device';
+  }
+
+  if (heartRateBpm != null) {
+    return `${heartRateBpm} bpm`;
+  }
+
+  if (heartRateStatus === 'connecting') {
+    return 'Connecting';
+  }
+
+  if (heartRateStatus === 'connected') {
+    return 'Waiting';
+  }
+
+  if (heartRateStatus === 'error') {
+    return heartRateError ? heartRateError.slice(0, 28) : 'Error';
+  }
+
+  return '--';
+}
+
+function formatHeartRateZone(context: DashboardValueContext) {
+  const currentHeartRate = formatCurrentHeartRate(context);
+
+  if (
+    !context.settings.connectedHeartRateDevice ||
+    context.heartRateBpm == null
+  ) {
+    return currentHeartRate;
+  }
+
+  const maxHeartRate = getEffectiveMaxHeartRateBpm(context.settings);
+
+  if (!maxHeartRate) {
+    return 'Set age or max HR';
+  }
+
+  const result = getHeartRateZone(context.heartRateBpm, maxHeartRate.bpm);
+
+  return result ? getHeartRateZoneLabel(result) : '--';
 }
 
 function formatTemperature(
@@ -1168,29 +1245,23 @@ export const dashboardMetricCatalog: DashboardMetricDefinition[] = [
     category: 'Health',
     supportedSpans: metricSpans,
     defaultSpan: '1.5x2',
-    getValue: ({ heartRateBpm, heartRateStatus, heartRateError, settings }) => {
-      if (!settings.connectedHeartRateDevice) {
-        return 'No device';
-      }
-
-      if (heartRateBpm != null) {
-        return `${heartRateBpm} bpm`;
-      }
-
-      if (heartRateStatus === 'connecting') {
-        return 'Connecting';
-      }
-
-      if (heartRateStatus === 'connected') {
-        return 'Waiting';
-      }
-
-      if (heartRateStatus === 'error') {
-        return heartRateError ? heartRateError.slice(0, 28) : 'Error';
-      }
-
-      return '--';
-    },
+    getValue: formatCurrentHeartRate,
+  },
+  {
+    id: 'heartRateZoneBar',
+    label: 'Heart Rate Zone Bar',
+    category: 'Health',
+    supportedSpans: heartRateZoneBarSpans,
+    defaultSpan: '3x2',
+    getValue: formatHeartRateZone,
+  },
+  {
+    id: 'heartRateZoneGauge',
+    label: 'Heart Rate Zone Gauge',
+    category: 'Health',
+    supportedSpans: heartRateZoneGaugeSpans,
+    defaultSpan: '1.5x2',
+    getValue: formatHeartRateZone,
   },
 ];
 
