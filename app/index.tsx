@@ -26,6 +26,7 @@ import {
   useThemeColors,
 } from '../src/features/settings/settings';
 import {
+  DASHBOARD_COLUMNS,
   DASHBOARD_MAX_ROWS,
   canAddDashboardMetric,
   createDashboardCard,
@@ -36,9 +37,11 @@ import {
   dashboardSpans,
   getDashboardLayoutRows,
   getDashboardSpanDimensions,
+  type DashboardValueContext,
   type DashboardMetricCategory,
 } from '../src/features/ride/dashboard';
 import { DashboardGrid } from '../src/features/ride/DashboardGrid';
+import { RideMap } from '../src/features/ride/RideMap';
 import {
   getUpdatedRecentRouteDestinations,
   loadRecentRouteDestinations,
@@ -53,6 +56,8 @@ import type {
   DashboardScreen,
   DestinationOption,
   PlannedRoute,
+  RidePoint,
+  RideSettings,
   RouteCoordinate,
 } from '../src/features/ride/types';
 import { useForegroundRideRecorder } from '../src/features/ride/useForegroundRideRecorder';
@@ -126,6 +131,13 @@ const weatherMetricIds = new Set<DashboardMetricId>([
   'windMin',
   'windLapMin',
 ]);
+
+type DashboardMapRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 
 function distanceBetweenCoordinates(a: RouteCoordinate, b: RouteCoordinate) {
   const earthRadiusMeters = 6_371_000;
@@ -207,6 +219,78 @@ function isDashboardScreenSwipe(dx: number, dy: number) {
   const absoluteY = Math.abs(dy);
 
   return absoluteX > DASHBOARD_SWIPE_START_PX && absoluteX > absoluteY * 1.35;
+}
+
+function getPrimaryDashboardMapCard(layout: DashboardCard[]) {
+  return layout.find((card) => card.metricId === 'map') ?? null;
+}
+
+function getDashboardCardRect(
+  layout: DashboardCard[],
+  cardId: string,
+  pageWidth: number,
+  rowHeight: number,
+): DashboardMapRect | null {
+  let totalRows = 0;
+  let lineColumns = 0;
+  let lineRows = 0;
+
+  for (const card of layout) {
+    const { columns, rows } = getDashboardSpanDimensions(card.span);
+
+    if (lineColumns > 0 && lineColumns + columns > DASHBOARD_COLUMNS + 0.001) {
+      totalRows += lineRows;
+      lineColumns = 0;
+      lineRows = 0;
+    }
+
+    if (card.id === cardId) {
+      return {
+        x: (lineColumns / DASHBOARD_COLUMNS) * pageWidth,
+        y: totalRows * rowHeight,
+        width: (columns / DASHBOARD_COLUMNS) * pageWidth,
+        height: rows * rowHeight,
+      };
+    }
+
+    lineColumns += columns;
+    lineRows = Math.max(lineRows, rows);
+  }
+
+  return null;
+}
+
+function getDashboardMetricValues(
+  layout: DashboardCard[],
+  context: DashboardValueContext,
+) {
+  const values = new Map<DashboardMetricId, string>();
+
+  for (const card of layout) {
+    if (values.has(card.metricId)) {
+      continue;
+    }
+
+    const metric = dashboardMetricById.get(card.metricId);
+
+    if (metric) {
+      values.set(card.metricId, metric.getValue(context));
+    }
+  }
+
+  return values;
+}
+
+function getSharedMapTransitionProgress(
+  dashboardSlide: Animated.Value,
+  dashboardPageWidth: number,
+  dashboardSwipeDirection: number,
+) {
+  return dashboardSlide.interpolate({
+    inputRange: [-dashboardPageWidth, 0, dashboardPageWidth],
+    outputRange: dashboardSwipeDirection > 0 ? [1, 0, 0] : [0, 0, 1],
+    extrapolate: 'clamp',
+  });
 }
 
 export default function HomeScreen() {
@@ -302,16 +386,23 @@ export default function HomeScreen() {
   const canAddDashboardCard = dashboardMetricCatalog.some((metric) =>
     canAddDashboardMetric(displayedLayout, metric.id),
   );
-  const shouldConnectHeartRate = displayedLayout.some(
+  const dashboardSwipeTargetScreen =
+    dashboardSwipeTargetIndex == null
+      ? null
+      : displayedDashboardScreens[dashboardSwipeTargetIndex];
+  const dashboardRuntimeLayout = dashboardSwipeTargetScreen
+    ? [...displayedLayout, ...dashboardSwipeTargetScreen.layout]
+    : displayedLayout;
+  const shouldConnectHeartRate = dashboardRuntimeLayout.some(
     (card) => card.metricId === 'heartRateCurrent',
   );
-  const shouldReadDeviceBattery = displayedLayout.some(
+  const shouldReadDeviceBattery = dashboardRuntimeLayout.some(
     (card) => card.metricId === 'deviceBatteryLevel',
   );
-  const shouldCollectWeather = displayedLayout.some((card) =>
+  const shouldCollectWeather = dashboardRuntimeLayout.some((card) =>
     weatherMetricIds.has(card.metricId),
   );
-  const shouldRunClock = displayedLayout.some((card) =>
+  const shouldRunClock = dashboardRuntimeLayout.some((card) =>
     clockMetricIds.has(card.metricId),
   );
   const heartRate = useHeartRateMonitor(
@@ -324,10 +415,6 @@ export default function HomeScreen() {
     recorder.status,
     shouldCollectWeather,
   );
-  const dashboardSwipeTargetScreen =
-    dashboardSwipeTargetIndex == null
-      ? null
-      : displayedDashboardScreens[dashboardSwipeTargetIndex];
   const dashboardTargetTranslateX =
     dashboardSwipeDirection === 0
       ? dashboardSlide
@@ -354,6 +441,32 @@ export default function HomeScreen() {
     currentWeather: weather.currentWeather,
     weatherSamples: weather.weatherSamples,
   };
+  const dashboardMetricValues = getDashboardMetricValues(
+    dashboardRuntimeLayout,
+    dashboardContext,
+  );
+  const activeDashboardMapCard = getPrimaryDashboardMapCard(displayedLayout);
+  const targetDashboardMapCard = dashboardSwipeTargetScreen
+    ? getPrimaryDashboardMapCard(dashboardSwipeTargetScreen.layout)
+    : null;
+  const activeDashboardMapRect =
+    !isEditingDashboard && activeDashboardMapCard
+      ? getDashboardCardRect(
+          displayedLayout,
+          activeDashboardMapCard.id,
+          dashboardPageWidth,
+          dashboardRowHeight,
+        )
+      : null;
+  const targetDashboardMapRect =
+    !isEditingDashboard && dashboardSwipeTargetScreen && targetDashboardMapCard
+      ? getDashboardCardRect(
+          dashboardSwipeTargetScreen.layout,
+          targetDashboardMapCard.id,
+          dashboardPageWidth,
+          dashboardRowHeight,
+        )
+      : null;
   const visibleRecentRouteDestinations =
     destinationOptions.length === 0 && !isSearchingDestinations
       ? recentRouteDestinations
@@ -1424,6 +1537,8 @@ export default function HomeScreen() {
                     context={dashboardContext}
                     isEditing={isEditingDashboard}
                     layout={displayedLayout}
+                    mapTileMode={isEditingDashboard ? 'live' : 'slot'}
+                    metricValues={dashboardMetricValues}
                     rowHeight={dashboardRowHeight}
                     settings={settings}
                     onAddCard={() => setMetricPickerCardId('new')}
@@ -1466,6 +1581,8 @@ export default function HomeScreen() {
                       context={dashboardContext}
                       isEditing={isEditingDashboard}
                       layout={dashboardSwipeTargetScreen.layout}
+                      mapTileMode={isEditingDashboard ? 'live' : 'slot'}
+                      metricValues={dashboardMetricValues}
                       rowHeight={dashboardRowHeight}
                       settings={settings}
                       onAddCard={() => setMetricPickerCardId('new')}
@@ -1482,6 +1599,30 @@ export default function HomeScreen() {
                     />
                   </ScrollView>
                 </Animated.View>
+              ) : null}
+              {!isEditingDashboard &&
+              (activeDashboardMapRect || targetDashboardMapRect) ? (
+                <SharedDashboardMapLayer
+                  activeRect={activeDashboardMapRect}
+                  colors={colors}
+                  dashboardPageWidth={dashboardPageWidth}
+                  dashboardSlide={dashboardSlide}
+                  dashboardSwipeDirection={dashboardSwipeDirection}
+                  dashboardTargetTranslateX={dashboardTargetTranslateX}
+                  destinationOptions={destinationOptions}
+                  isNavigating={dashboardContext.isNavigating}
+                  mapType={settings.mapType}
+                  onCancelNavigation={cancelNavigation}
+                  onLongPress={
+                    canStart && activeDashboardMapCard
+                      ? enterDashboardEditMode
+                      : undefined
+                  }
+                  plannedRoute={plannedRoute}
+                  points={recorder.routePoints}
+                  targetRect={targetDashboardMapRect}
+                  unitSystem={settings.unitSystem}
+                />
               ) : null}
             </View>
             {dashboardScreenCount > 1 ? (
@@ -1932,6 +2073,152 @@ export default function HomeScreen() {
   );
 }
 
+function SharedDashboardMapLayer({
+  activeRect,
+  colors,
+  dashboardPageWidth,
+  dashboardSlide,
+  dashboardSwipeDirection,
+  dashboardTargetTranslateX,
+  destinationOptions,
+  isNavigating,
+  mapType,
+  onCancelNavigation,
+  onLongPress,
+  plannedRoute,
+  points,
+  targetRect,
+  unitSystem,
+}: {
+  activeRect: DashboardMapRect | null;
+  colors: ThemeColors;
+  dashboardPageWidth: number;
+  dashboardSlide: Animated.Value;
+  dashboardSwipeDirection: number;
+  dashboardTargetTranslateX:
+    | Animated.Value
+    | Animated.AnimatedInterpolation<number>;
+  destinationOptions: DestinationOption[];
+  isNavigating: boolean;
+  mapType: RideSettings['mapType'];
+  onCancelNavigation: () => void;
+  onLongPress?: () => void;
+  plannedRoute: PlannedRoute | null;
+  points: RidePoint[];
+  targetRect: DashboardMapRect | null;
+  unitSystem: RideSettings['unitSystem'];
+}) {
+  const styles = createStyles(colors);
+  const baseRect = activeRect ?? targetRect;
+  const hasMapRect = baseRect != null;
+  const [isMapLoaded, setIsMapLoaded] = useState(false);
+  const [mapOpacity] = useState(() => new Animated.Value(0));
+
+  useEffect(() => {
+    Animated.timing(mapOpacity, {
+      toValue: isMapLoaded && hasMapRect ? 1 : 0,
+      duration: isMapLoaded ? 180 : 80,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [hasMapRect, isMapLoaded, mapOpacity]);
+
+  if (!baseRect) {
+    return null;
+  }
+
+  const sharedMapTransform =
+    activeRect && targetRect && dashboardSwipeDirection !== 0
+      ? getSharedMapTransform({
+          activeRect,
+          dashboardPageWidth,
+          dashboardSlide,
+          dashboardSwipeDirection,
+          targetRect,
+        })
+      : activeRect && dashboardSwipeDirection !== 0
+        ? [{ translateX: dashboardSlide }]
+        : !activeRect && targetRect && dashboardSwipeDirection !== 0
+          ? [{ translateX: dashboardTargetTranslateX }]
+          : [];
+
+  return (
+    <Animated.View
+      pointerEvents={isMapLoaded ? 'auto' : 'none'}
+      style={[
+        styles.sharedDashboardMap,
+        {
+          top: baseRect.y,
+          left: baseRect.x,
+          width: baseRect.width,
+          height: baseRect.height,
+          opacity: mapOpacity,
+          transform: sharedMapTransform,
+        },
+      ]}
+    >
+      <RideMap
+        destinationOptions={destinationOptions}
+        isNavigating={isNavigating}
+        mapType={mapType}
+        onCancelNavigation={onCancelNavigation}
+        onLoadStateChange={setIsMapLoaded}
+        onLongPress={onLongPress}
+        plannedRoute={plannedRoute}
+        points={points}
+        unitSystem={unitSystem}
+      />
+    </Animated.View>
+  );
+}
+
+function getSharedMapTransform({
+  activeRect,
+  dashboardPageWidth,
+  dashboardSlide,
+  dashboardSwipeDirection,
+  targetRect,
+}: {
+  activeRect: DashboardMapRect;
+  dashboardPageWidth: number;
+  dashboardSlide: Animated.Value;
+  dashboardSwipeDirection: number;
+  targetRect: DashboardMapRect;
+}) {
+  const progress = getSharedMapTransitionProgress(
+    dashboardSlide,
+    dashboardPageWidth,
+    dashboardSwipeDirection,
+  );
+  const activeCenterX = activeRect.x + activeRect.width / 2;
+  const activeCenterY = activeRect.y + activeRect.height / 2;
+  const targetCenterX = targetRect.x + targetRect.width / 2;
+  const targetCenterY = targetRect.y + targetRect.height / 2;
+  const scaleX = targetRect.width / activeRect.width;
+  const scaleY = targetRect.height / activeRect.height;
+
+  return [
+    {
+      translateX: Animated.multiply(progress, targetCenterX - activeCenterX),
+    },
+    {
+      translateY: Animated.multiply(progress, targetCenterY - activeCenterY),
+    },
+    {
+      scaleX: progress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [1, scaleX],
+      }),
+    },
+    {
+      scaleY: progress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [1, scaleY],
+      }),
+    },
+  ];
+}
+
 function DashboardMetricPickerModal({
   colors,
   canSelectMetric,
@@ -2169,6 +2456,12 @@ function createStyles(colors: ThemeColors) {
     dashboardSlideViewport: {
       flex: 1,
       overflow: 'hidden',
+    },
+    sharedDashboardMap: {
+      position: 'absolute',
+      zIndex: 4,
+      overflow: 'hidden',
+      backgroundColor: colors.card,
     },
     dashboardSlidePage: {
       flex: 1,

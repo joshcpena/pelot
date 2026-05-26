@@ -33,6 +33,10 @@ const STANDARD_GPS_TIME_INTERVAL_MS = 5000;
 const BEST_GPS_TIME_INTERVAL_MS = 1000;
 const BAROMETER_UPDATE_INTERVAL_MS = 5000;
 const RESUME_POINT_SYNC_DELAY_MS = 1500;
+const BACKGROUND_LOCATION_UNAVAILABLE_ERROR =
+  'Background location is not enabled, so the ride may not keep recording while Pelot is not open.';
+const BACKGROUND_LOCATION_START_WARNING =
+  'Ride started, but background location is not enabled yet.';
 
 const initialMetrics: RideMetrics = {
   startedAt: null,
@@ -128,6 +132,28 @@ function getLocationTimeInterval(settings: RideSettings) {
   return settings.gpsAccuracy === 'best'
     ? BEST_GPS_TIME_INTERVAL_MS
     : STANDARD_GPS_TIME_INTERVAL_MS;
+}
+
+function isBackgroundLocationWarning(error: string | null) {
+  return (
+    error === BACKGROUND_LOCATION_UNAVAILABLE_ERROR ||
+    error === BACKGROUND_LOCATION_START_WARNING
+  );
+}
+
+async function getBackgroundLocationPermission() {
+  return Location.getBackgroundPermissionsAsync();
+}
+
+async function requestBackgroundLocationPermission() {
+  const requestedPermission =
+    await Location.requestBackgroundPermissionsAsync();
+
+  if (requestedPermission.status === Location.PermissionStatus.GRANTED) {
+    return requestedPermission;
+  }
+
+  return getBackgroundLocationPermission();
 }
 
 export function useForegroundRideRecorder(settings: RideSettings) {
@@ -448,6 +474,13 @@ export function useForegroundRideRecorder(settings: RideSettings) {
         settingsRef.current,
       );
       isBackgroundRecordingRef.current = backgroundStarted;
+
+      if (backgroundStarted) {
+        setError((currentError) =>
+          isBackgroundLocationWarning(currentError) ? null : currentError,
+        );
+      }
+
       return backgroundStarted;
     } catch {
       isBackgroundRecordingRef.current = false;
@@ -555,6 +588,14 @@ export function useForegroundRideRecorder(settings: RideSettings) {
 
     if (nextState === 'active') {
       shouldSyncBeforeNextLocationRef.current = true;
+      const backgroundPermission = await getBackgroundLocationPermission();
+
+      if (backgroundPermission.status === Location.PermissionStatus.GRANTED) {
+        setError((currentError) =>
+          isBackgroundLocationWarning(currentError) ? null : currentError,
+        );
+      }
+
       await syncPersistedRidePoints();
       if (!isCurrentTransition()) {
         return;
@@ -583,9 +624,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
     await stopWatchingLocation();
 
     if (!backgroundStarted) {
-      setError(
-        'Background location is not enabled, so the ride may not keep recording while Pelot is not open.',
-      );
+      setError(BACKGROUND_LOCATION_UNAVAILABLE_ERROR);
     }
   }
 
@@ -602,8 +641,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
       return;
     }
 
-    const backgroundPermission =
-      await Location.requestBackgroundPermissionsAsync();
+    const backgroundPermission = await requestBackgroundLocationPermission();
 
     await initializeDatabase();
     const rideId = createRideId();
@@ -635,7 +673,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
     await startWatchingLocation();
 
     if (backgroundPermission.status !== Location.PermissionStatus.GRANTED) {
-      setError('Ride started, but background location is not enabled yet.');
+      setError(BACKGROUND_LOCATION_START_WARNING);
     }
 
     if (settings.keepAwakeDuringRide) {

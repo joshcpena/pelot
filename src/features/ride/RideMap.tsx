@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { type ThemeColors, useThemeColors } from '../settings/settings';
@@ -11,6 +12,7 @@ import type {
 export function RideMap({
   destinationOptions,
   isNavigating,
+  onLoadStateChange,
   onLongPress,
   points,
   plannedRoute,
@@ -18,6 +20,7 @@ export function RideMap({
   destinationOptions?: DestinationOption[];
   isNavigating?: boolean;
   onCancelNavigation?: () => void;
+  onLoadStateChange?: (isLoaded: boolean) => void;
   onLongPress?: () => void;
   points: RidePoint[];
   mapType?: RideSettings['mapType'];
@@ -26,6 +29,12 @@ export function RideMap({
 }) {
   const colors = useThemeColors();
   const styles = createStyles(colors);
+
+  useEffect(() => {
+    onLoadStateChange?.(true);
+
+    return () => onLoadStateChange?.(false);
+  }, [onLoadStateChange]);
 
   return (
     <Pressable

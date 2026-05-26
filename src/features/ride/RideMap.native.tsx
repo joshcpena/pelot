@@ -56,6 +56,7 @@ type RideMapProps = {
   destinationOptions?: DestinationOption[];
   isNavigating?: boolean;
   onCancelNavigation?: () => void;
+  onLoadStateChange?: (isLoaded: boolean) => void;
   onLongPress?: () => void;
   points: RidePoint[];
   mapType: RideSettings['mapType'];
@@ -335,6 +336,7 @@ function RideMapComponent({
   destinationOptions = [],
   isNavigating = false,
   onCancelNavigation,
+  onLoadStateChange,
   onLongPress,
   points,
   mapType,
@@ -468,6 +470,10 @@ function RideMapComponent({
       };
     }, []),
   );
+
+  useEffect(() => {
+    onLoadStateChange?.(isStyleLoaded);
+  }, [isStyleLoaded, onLoadStateChange]);
 
   useEffect(() => {
     if (
@@ -817,6 +823,7 @@ function areRideMapPropsEqual(previous: RideMapProps, next: RideMapProps) {
     previous.destinationOptions === next.destinationOptions &&
     previous.isNavigating === next.isNavigating &&
     Boolean(previous.onCancelNavigation) === Boolean(next.onCancelNavigation) &&
+    previous.onLoadStateChange === next.onLoadStateChange &&
     Boolean(previous.onLongPress) === Boolean(next.onLongPress) &&
     previous.points === next.points &&
     previous.mapType === next.mapType &&

@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { RidePoint, RideStatus } from './types';
 
-const WEATHER_REFRESH_MS = 5 * 60 * 1000;
-const WEATHER_REFRESH_DISTANCE_METERS = 1000;
+const WEATHER_REFRESH_MS = 7.5 * 60 * 1000;
 
 export type WeatherSample = {
   recordedAt: number;
@@ -18,29 +17,6 @@ type OpenMeteoCurrentWeather = {
     wind_speed_10m?: number;
   };
 };
-
-function toRadians(degrees: number) {
-  return (degrees * Math.PI) / 180;
-}
-
-function distanceBetweenCoordinates(a: RidePoint, b: RidePoint) {
-  const earthRadiusMeters = 6_371_000;
-  const deltaLatitude = toRadians(b.latitude - a.latitude);
-  const deltaLongitude = toRadians(b.longitude - a.longitude);
-  const latitudeA = toRadians(a.latitude);
-  const latitudeB = toRadians(b.latitude);
-  const haversine =
-    Math.sin(deltaLatitude / 2) ** 2 +
-    Math.cos(latitudeA) *
-      Math.cos(latitudeB) *
-      Math.sin(deltaLongitude / 2) ** 2;
-
-  return (
-    earthRadiusMeters *
-    2 *
-    Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine))
-  );
-}
 
 async function fetchCurrentWeather(point: RidePoint): Promise<WeatherSample> {
   const params = new URLSearchParams({
@@ -104,15 +80,10 @@ export function useRideWeatherSamples(
       return;
     }
 
-    const lastFetchPoint = lastFetchPointRef.current;
     const lastFetchAt = lastFetchAtRef.current;
-    const hasMovedEnough = lastFetchPoint
-      ? distanceBetweenCoordinates(lastFetchPoint, latestPoint) >=
-        WEATHER_REFRESH_DISTANCE_METERS
-      : true;
     const isStale = Date.now() - lastFetchAt >= WEATHER_REFRESH_MS;
 
-    if (!hasMovedEnough && !isStale) {
+    if (!isStale) {
       return;
     }
 

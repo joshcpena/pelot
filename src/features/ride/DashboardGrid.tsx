@@ -20,7 +20,7 @@ import {
   type DashboardValueContext,
 } from './dashboard';
 import { RideMap } from './RideMap';
-import type { DashboardCard, RideSettings } from './types';
+import type { DashboardCard, DashboardMetricId, RideSettings } from './types';
 
 type CardLayout = {
   x: number;
@@ -35,6 +35,8 @@ type DragState = {
   x: Animated.Value;
   y: Animated.Value;
 };
+
+type DashboardMapTileMode = 'live' | 'slot';
 
 const ENTER_EDIT_DELAY_MS = 550;
 
@@ -58,6 +60,8 @@ export function DashboardGrid({
   settings,
   rowHeight = 66,
   canAddCard = true,
+  mapTileMode = 'live',
+  metricValues,
   onLongPressCard,
   onLongPressEmpty,
   isEditing = false,
@@ -73,6 +77,8 @@ export function DashboardGrid({
   settings: RideSettings;
   rowHeight?: number;
   canAddCard?: boolean;
+  mapTileMode?: DashboardMapTileMode;
+  metricValues?: Map<DashboardMetricId, string>;
   onLongPressCard?: (card: DashboardCard) => void;
   onLongPressEmpty?: () => void;
   isEditing?: boolean;
@@ -209,6 +215,39 @@ export function DashboardGrid({
     dragStateRef.current = null;
     lastTargetIdRef.current = null;
   }
+
+  function renderMapContent(
+    card: DashboardCard,
+    shouldHandleLongPress: boolean,
+  ) {
+    if (mapTileMode === 'slot') {
+      return (
+        <View style={styles.mapContent}>
+          <DashboardMapSlotPlaceholder styles={styles} />
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.mapContent}>
+        <RideMap
+          destinationOptions={context.destinationOptions}
+          isNavigating={context.isNavigating}
+          onCancelNavigation={onCancelNavigation}
+          onLongPress={
+            shouldHandleLongPress && !isEditing && onLongPressCard
+              ? () => onLongPressCard(card)
+              : undefined
+          }
+          points={context.routePoints}
+          mapType={settings.mapType}
+          plannedRoute={context.plannedRoute}
+          unitSystem={settings.unitSystem}
+        />
+      </View>
+    );
+  }
+
   const cards = layout.map((card) => {
     const metric = dashboardMetricById.get(card.metricId);
 
@@ -222,22 +261,7 @@ export function DashboardGrid({
     const cardStyle = { width, height };
     const content =
       card.metricId === 'map' ? (
-        <View style={styles.mapContent}>
-          <RideMap
-            destinationOptions={context.destinationOptions}
-            isNavigating={context.isNavigating}
-            onCancelNavigation={onCancelNavigation}
-            onLongPress={
-              !isEditing && onLongPressCard
-                ? () => onLongPressCard(card)
-                : undefined
-            }
-            points={context.routePoints}
-            mapType={settings.mapType}
-            plannedRoute={context.plannedRoute}
-            unitSystem={settings.unitSystem}
-          />
-        </View>
+        renderMapContent(card, true)
       ) : (
         <MetricCardContent
           colors={colors}
@@ -245,7 +269,7 @@ export function DashboardGrid({
           label={metric.label}
           columns={columns}
           rows={rows}
-          value={metric.getValue(context)}
+          value={metricValues?.get(card.metricId) ?? metric.getValue(context)}
         />
       );
 
@@ -361,16 +385,7 @@ export function DashboardGrid({
     const { columns } = getDashboardSpanDimensions(card.span);
 
     return card.metricId === 'map' ? (
-      <View style={styles.mapContent}>
-        <RideMap
-          destinationOptions={context.destinationOptions}
-          isNavigating={context.isNavigating}
-          points={context.routePoints}
-          mapType={settings.mapType}
-          plannedRoute={context.plannedRoute}
-          unitSystem={settings.unitSystem}
-        />
-      </View>
+      renderMapContent(card, false)
     ) : (
       <MetricCardContent
         colors={colors}
@@ -378,10 +393,23 @@ export function DashboardGrid({
         label={metric.label}
         columns={columns}
         rows={getDashboardSpanDimensions(card.span).rows}
-        value={metric.getValue(context)}
+        value={metricValues?.get(card.metricId) ?? metric.getValue(context)}
       />
     );
   }
+}
+
+function DashboardMapSlotPlaceholder({
+  styles,
+}: {
+  styles: ReturnType<typeof createStyles>;
+}) {
+  return (
+    <View style={styles.mapSlotPlaceholder}>
+      <View style={styles.mapSlotHorizon} />
+      <Text style={styles.mapSlotLabel}>Map</Text>
+    </View>
+  );
 }
 
 function DashboardMetricCard({
@@ -785,6 +813,33 @@ function createStyles(colors: ThemeColors) {
     },
     mapContent: {
       flex: 1,
+    },
+    mapSlotPlaceholder: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+    },
+    mapSlotHorizon: {
+      position: 'absolute',
+      right: -24,
+      bottom: -36,
+      left: -24,
+      height: '58%',
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      transform: [{ rotate: '-7deg' }],
+    },
+    mapSlotLabel: {
+      color: colors.mutedText,
+      fontSize: 12,
+      fontWeight: '900',
+      letterSpacing: 0,
+      textTransform: 'uppercase',
     },
     metricCard: {
       flex: 1,
