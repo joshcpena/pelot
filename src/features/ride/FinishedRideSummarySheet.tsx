@@ -9,6 +9,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  type DimensionValue,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -274,9 +275,6 @@ function FinishedRideSummarySheetContent({
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>Feeling</Text>
-                <Text style={styles.sectionDetail}>
-                  {feelingRating == null ? 'Not saved' : `${feelingRating}/10`}
-                </Text>
               </View>
               <FeelingSlider
                 value={feelingRating}
@@ -469,6 +467,52 @@ function HeartRateChart({
   );
 }
 
+const FEELING_STEPS = Array.from({ length: 11 }, (_, index) => index);
+
+function getFeelingDescriptor(value: number | null) {
+  if (value == null) {
+    return 'Not rated';
+  }
+
+  if (value <= 2) {
+    return 'Rough';
+  }
+
+  if (value <= 4) {
+    return 'Tough';
+  }
+
+  if (value <= 6) {
+    return 'Steady';
+  }
+
+  if (value <= 8) {
+    return 'Strong';
+  }
+
+  return 'Outstanding';
+}
+
+function getFeelingColor(value: number | null, colors: ThemeColors) {
+  if (value == null) {
+    return colors.mutedText;
+  }
+
+  if (value <= 2) {
+    return colors.danger;
+  }
+
+  if (value <= 5) {
+    return colors.warning;
+  }
+
+  if (value <= 8) {
+    return colors.accent;
+  }
+
+  return colors.success;
+}
+
 function FeelingSlider({
   value,
   onChange,
@@ -480,26 +524,82 @@ function FeelingSlider({
 }) {
   const styles = createStyles(colors);
   const sliderValue = value ?? 0;
+  const feelingColor = getFeelingColor(value, colors);
+  const feelingDescriptor = getFeelingDescriptor(value);
+  const thumbOffset = `${(sliderValue / 10) * 100}%` as DimensionValue;
 
   return (
     <View style={styles.feeling}>
-      <View style={styles.feelingScale}>
-        <Text style={styles.feelingEndpoint}>Awful</Text>
-        <Text style={styles.feelingEndpoint}>Outstanding</Text>
+      <View style={styles.feelingCard}>
+        <View style={styles.feelingCardHeader}>
+          <View style={styles.feelingMood}>
+            <Text style={[styles.feelingMoodLabel, { color: feelingColor }]}>
+              {feelingDescriptor}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.feelingTrackControl}>
+          <View pointerEvents="none" style={styles.feelingTrack}>
+            {FEELING_STEPS.map((step) => {
+              const isActive = value != null && step <= sliderValue;
+
+              return (
+                <View
+                  key={step}
+                  style={[
+                    styles.feelingTrackSegment,
+                    isActive && { backgroundColor: feelingColor },
+                  ]}
+                />
+              );
+            })}
+          </View>
+          {value == null ? null : (
+            <View
+              pointerEvents="none"
+              style={[
+                styles.feelingThumb,
+                { backgroundColor: feelingColor, left: thumbOffset },
+              ]}
+            />
+          )}
+          <ExpoSlider
+            maximumTrackTintColor={colors.border}
+            maximumValue={10}
+            minimumTrackTintColor={feelingColor}
+            minimumValue={0}
+            step={1}
+            style={styles.slider}
+            thumbTintColor={feelingColor}
+            value={sliderValue}
+            onValueChange={(nextValue) => onChange(Math.round(nextValue))}
+          />
+        </View>
+
+        <View style={styles.feelingScale}>
+          <View style={styles.feelingEndpointGroup}>
+            <View
+              style={[
+                styles.feelingEndpointDot,
+                { backgroundColor: colors.danger },
+              ]}
+            />
+            <Text style={styles.feelingEndpoint}>Awful</Text>
+          </View>
+          <View style={styles.feelingEndpointGroup}>
+            <Text style={styles.feelingEndpoint}>Outstanding</Text>
+            <View
+              style={[
+                styles.feelingEndpointDot,
+                { backgroundColor: colors.success },
+              ]}
+            />
+          </View>
+        </View>
       </View>
-      <ExpoSlider
-        maximumTrackTintColor={colors.border}
-        maximumValue={10}
-        minimumTrackTintColor={colors.accent}
-        minimumValue={0}
-        step={1}
-        style={styles.slider}
-        thumbTintColor={colors.accent}
-        value={sliderValue}
-        onValueChange={(nextValue) => onChange(Math.round(nextValue))}
-      />
       {value == null ? (
-        <Text style={styles.feelingHint}>No feeling rating selected.</Text>
+        <Text style={styles.feelingHint}>No feeling rating selected</Text>
       ) : (
         <Pressable
           accessibilityRole="button"
@@ -725,20 +825,94 @@ function createStyles(colors: ThemeColors) {
       textAlign: 'center',
     },
     feeling: {
-      gap: 12,
+      gap: 10,
     },
-    feelingScale: {
+    feelingCard: {
+      gap: 12,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 18,
+      backgroundColor: colors.background,
+      padding: 13,
+      boxShadow: '0 8px 18px rgba(9, 105, 218, 0.08)',
+    },
+    feelingCardHeader: {
       flexDirection: 'row',
+      alignItems: 'center',
       justifyContent: 'space-between',
       gap: 12,
     },
+    feelingMood: {
+      flex: 1,
+      minWidth: 0,
+      gap: 2,
+    },
+    feelingMoodLabel: {
+      fontSize: 22,
+      fontWeight: '900',
+      lineHeight: 27,
+    },
+    feelingTrackControl: {
+      position: 'relative',
+      justifyContent: 'center',
+      minHeight: 52,
+      paddingHorizontal: 4,
+    },
+    feelingTrack: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      height: 16,
+    },
+    feelingTrackSegment: {
+      flex: 1,
+      height: 10,
+      borderRadius: 999,
+      backgroundColor: colors.border,
+      opacity: 0.92,
+    },
+    feelingThumb: {
+      position: 'absolute',
+      top: 12,
+      width: 28,
+      height: 28,
+      borderWidth: 3,
+      borderColor: colors.card,
+      borderRadius: 999,
+      marginLeft: -14,
+      boxShadow: '0 5px 12px rgba(0, 0, 0, 0.24)',
+    },
+    feelingScale: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    feelingEndpointGroup: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    feelingEndpointDot: {
+      width: 7,
+      height: 7,
+      borderRadius: 999,
+    },
     feelingEndpoint: {
       color: colors.mutedText,
-      fontSize: 13,
-      fontWeight: '800',
+      fontSize: 12,
+      fontWeight: '900',
+      textTransform: 'uppercase',
     },
     slider: {
-      height: 40,
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      height: 52,
+      opacity: 0.01,
       width: '100%',
     },
     feelingHint: {
@@ -748,8 +922,12 @@ function createStyles(colors: ThemeColors) {
     },
     clearFeelingButton: {
       alignSelf: 'flex-start',
+      borderWidth: 1,
+      borderColor: colors.border,
       borderRadius: 999,
-      paddingVertical: 4,
+      backgroundColor: colors.background,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
     },
     clearFeelingButtonPressed: {
       opacity: 0.6,
