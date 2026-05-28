@@ -8,18 +8,14 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
 import Svg, { Circle, Line, Polyline } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { NativeTextInput } from '../../components/native-text-input';
-import {
-  type ThemeColors,
-  useResolvedTheme,
-  useThemeColors,
-} from '../settings/settings';
+import { type ThemeColors, useThemeColors } from '../settings/settings';
 import {
   formatAscent,
   formatCalories,
@@ -113,7 +109,6 @@ function FinishedRideSummarySheetContent({
   ride: FinishedRideSummary;
 }) {
   const colors = useThemeColors();
-  const resolvedTheme = useResolvedTheme();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const styles = createStyles(colors);
@@ -165,10 +160,9 @@ function FinishedRideSummarySheetContent({
               <View style={styles.headerText}>
                 <Text style={styles.eyebrow}>Ride complete</Text>
                 {isRenaming ? (
-                  <NativeTextInput
+                  <TextInput
                     accessibilityLabel="Ride title"
                     autoFocus
-                    colorScheme={resolvedTheme}
                     placeholder={getDefaultRideTitle(ride.summary.startedAt)}
                     placeholderTextColor={colors.mutedText}
                     style={styles.titleInput}

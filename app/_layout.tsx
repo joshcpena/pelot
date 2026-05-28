@@ -6,6 +6,9 @@ import {
   useThemeColors,
 } from '../src/features/settings/settings';
 
+const fastStackAnimation =
+  process.env.EXPO_OS === 'android' ? 'ios_from_right' : 'simple_push';
+
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -22,7 +25,8 @@ function AppStack() {
   return (
     <Stack
       screenOptions={{
-        animation: 'slide_from_right',
+        animation: fastStackAnimation,
+        animationDuration: 220,
         contentStyle: { backgroundColor: colors.background },
         headerShadowVisible: false,
         headerStyle: { backgroundColor: colors.background },

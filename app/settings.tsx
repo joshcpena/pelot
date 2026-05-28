@@ -1,8 +1,4 @@
 import { Host, Switch as ExpoSwitch } from '@expo/ui';
-import {
-  SegmentedControl,
-  type NativeSegmentedControlChangeEvent,
-} from '@expo/ui/community/segmented-control';
 import { useState, type ReactNode } from 'react';
 import {
   Modal,
@@ -10,10 +6,10 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
-import { NativeTextInput } from '../src/components/native-text-input';
 import {
   type ThemeColors,
   type ResolvedTheme,
@@ -76,35 +72,43 @@ function SegmentedOptionGroup<T extends string>({
   selectedValue,
   onSelect,
   styles,
-  tintColor,
 }: {
   options: readonly { label: string; value: T }[];
   selectedValue: T;
   onSelect: (value: T) => void;
   styles: ReturnType<typeof createStyles>;
-  tintColor: string;
 }) {
-  const selectedIndex = Math.max(
-    0,
-    options.findIndex((option) => option.value === selectedValue),
-  );
-
-  function handleChange(event: NativeSegmentedControlChangeEvent) {
-    const option = options[event.nativeEvent.selectedSegmentIndex];
-
-    if (option) {
-      onSelect(option.value);
-    }
-  }
-
   return (
-    <SegmentedControl
-      selectedIndex={selectedIndex}
-      style={styles.segmentedControl}
-      tintColor={tintColor}
-      values={options.map((option) => option.label)}
-      onChange={handleChange}
-    />
+    <View accessibilityRole="radiogroup" style={styles.segmentedControl}>
+      {options.map((option, index) => {
+        const isSelected = option.value === selectedValue;
+
+        return (
+          <Pressable
+            accessibilityRole="radio"
+            accessibilityState={{ checked: isSelected }}
+            key={option.value}
+            style={({ pressed }) => [
+              styles.segmentedOption,
+              index > 0 && styles.segmentedOptionDivider,
+              isSelected && styles.segmentedOptionSelected,
+              pressed && styles.segmentedOptionPressed,
+            ]}
+            onPress={() => onSelect(option.value)}
+          >
+            <Text
+              numberOfLines={1}
+              style={[
+                styles.segmentedOptionText,
+                isSelected && styles.segmentedOptionTextSelected,
+              ]}
+            >
+              {option.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
@@ -420,7 +424,6 @@ export default function SettingsScreen() {
           ]}
           selectedValue={settings.unitSystem}
           styles={styles}
-          tintColor={colors.accent}
           onSelect={updateUnitSystem}
         />
         <View style={styles.divider} />
@@ -433,7 +436,6 @@ export default function SettingsScreen() {
           ]}
           selectedValue={settings.theme}
           styles={styles}
-          tintColor={colors.accent}
           onSelect={(value) => update('theme', value)}
         />
       </Section>
@@ -469,9 +471,8 @@ export default function SettingsScreen() {
             <Text style={styles.label}>
               Weight ({settings.unitSystem === 'imperial' ? 'lb' : 'kg'})
             </Text>
-            <NativeTextInput
+            <TextInput
               accessibilityLabel={`Weight in ${settings.unitSystem === 'imperial' ? 'pounds' : 'kilograms'}`}
-              colorScheme={resolvedTheme}
               keyboardType="decimal-pad"
               placeholder={settings.unitSystem === 'imperial' ? '175' : '79'}
               placeholderTextColor={colors.mutedText}
@@ -490,9 +491,8 @@ export default function SettingsScreen() {
             <Text style={styles.label}>
               Height ({settings.unitSystem === 'imperial' ? 'in' : 'cm'})
             </Text>
-            <NativeTextInput
+            <TextInput
               accessibilityLabel={`Height in ${settings.unitSystem === 'imperial' ? 'inches' : 'centimeters'}`}
-              colorScheme={resolvedTheme}
               keyboardType="decimal-pad"
               placeholder={settings.unitSystem === 'imperial' ? '70' : '178'}
               placeholderTextColor={colors.mutedText}
@@ -509,9 +509,8 @@ export default function SettingsScreen() {
           </View>
           <View style={styles.profileField}>
             <Text style={styles.label}>Age</Text>
-            <NativeTextInput
+            <TextInput
               accessibilityLabel="Age"
-              colorScheme={resolvedTheme}
               keyboardType="number-pad"
               placeholder="35"
               placeholderTextColor={colors.mutedText}
@@ -524,9 +523,8 @@ export default function SettingsScreen() {
           </View>
           <View style={styles.profileField}>
             <Text style={styles.label}>Max HR (bpm)</Text>
-            <NativeTextInput
+            <TextInput
               accessibilityLabel="Maximum heart rate in beats per minute"
-              colorScheme={resolvedTheme}
               keyboardType="number-pad"
               maxLength={3}
               placeholder={
@@ -671,7 +669,6 @@ export default function SettingsScreen() {
           ]}
           selectedValue={settings.ascentSource}
           styles={styles}
-          tintColor={colors.accent}
           onSelect={(value) => update('ascentSource', value)}
         />
         <Text style={styles.muted}>
@@ -687,7 +684,6 @@ export default function SettingsScreen() {
           ]}
           selectedValue={settings.gpsAccuracy}
           styles={styles}
-          tintColor={colors.accent}
           onSelect={(value) => update('gpsAccuracy', value)}
         />
         <Text style={styles.muted}>
@@ -708,7 +704,6 @@ export default function SettingsScreen() {
           ]}
           selectedValue={settings.splitType}
           styles={styles}
-          tintColor={colors.accent}
           onSelect={(value) => update('splitType', value)}
         />
         <View style={styles.splitValueField}>
@@ -717,13 +712,12 @@ export default function SettingsScreen() {
               ? `Auto-lap every (${settings.unitSystem === 'imperial' ? 'mi' : 'km'})`
               : 'Auto-lap every (min)'}
           </Text>
-          <NativeTextInput
+          <TextInput
             accessibilityLabel={
               settings.splitType === 'distance'
                 ? `Auto-lap distance in ${settings.unitSystem === 'imperial' ? 'miles' : 'kilometers'}`
                 : 'Auto-lap duration in minutes'
             }
-            colorScheme={resolvedTheme}
             key={`${settings.splitType}-${settings.unitSystem}`}
             defaultValue={formatSplitValue(settings)}
             keyboardType="number-pad"
@@ -731,8 +725,8 @@ export default function SettingsScreen() {
             placeholder="10"
             placeholderTextColor={colors.mutedText}
             style={[styles.input, styles.splitValueInput]}
+            onEndEditing={(event) => commitSplitValue(event.nativeEvent.text)}
             onChangeText={updateSplitValue}
-            onEndEditingText={commitSplitValue}
           />
         </View>
       </Section>
@@ -750,7 +744,6 @@ export default function SettingsScreen() {
           ]}
           selectedValue={settings.mapType}
           styles={styles}
-          tintColor={colors.accent}
           onSelect={(value) => update('mapType', value)}
         />
         <View style={styles.divider} />
@@ -763,7 +756,6 @@ export default function SettingsScreen() {
           ]}
           selectedValue={settings.routeProfile}
           styles={styles}
-          tintColor={colors.accent}
           onSelect={(value) => update('routeProfile', value)}
         />
         <View style={styles.divider} />
@@ -1001,7 +993,38 @@ function createStyles(colors: ThemeColors) {
       gap: 8,
     },
     segmentedControl: {
+      flexDirection: 'row',
       height: 36,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: colors.mutedText,
+      borderRadius: 999,
+      backgroundColor: colors.card,
+    },
+    segmentedOption: {
+      minWidth: 0,
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 10,
+    },
+    segmentedOptionDivider: {
+      borderLeftWidth: 1,
+      borderLeftColor: colors.mutedText,
+    },
+    segmentedOptionSelected: {
+      backgroundColor: colors.accent,
+    },
+    segmentedOptionPressed: {
+      opacity: 0.82,
+    },
+    segmentedOptionText: {
+      color: colors.primaryText,
+      fontSize: 14,
+      fontWeight: '800',
+    },
+    segmentedOptionTextSelected: {
+      color: colors.inverseText,
     },
     switchRow: {
       flexDirection: 'row',
