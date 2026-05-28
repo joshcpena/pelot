@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
+import ExpoSlider from '@expo/ui/community/slider';
+import { useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -7,14 +8,18 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
 import Svg, { Circle, Line, Polyline } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { type ThemeColors, useThemeColors } from '../settings/settings';
+import { NativeTextInput } from '../../components/native-text-input';
+import {
+  type ThemeColors,
+  useResolvedTheme,
+  useThemeColors,
+} from '../settings/settings';
 import {
   formatAscent,
   formatCalories,
@@ -108,6 +113,7 @@ function FinishedRideSummarySheetContent({
   ride: FinishedRideSummary;
 }) {
   const colors = useThemeColors();
+  const resolvedTheme = useResolvedTheme();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const styles = createStyles(colors);
@@ -159,13 +165,15 @@ function FinishedRideSummarySheetContent({
               <View style={styles.headerText}>
                 <Text style={styles.eyebrow}>Ride complete</Text>
                 {isRenaming ? (
-                  <TextInput
+                  <NativeTextInput
+                    accessibilityLabel="Ride title"
                     autoFocus
-                    value={titleInput}
+                    colorScheme={resolvedTheme}
                     placeholder={getDefaultRideTitle(ride.summary.startedAt)}
                     placeholderTextColor={colors.mutedText}
-                    onChangeText={setTitleInput}
                     style={styles.titleInput}
+                    value={titleInput}
+                    onChangeText={setTitleInput}
                   />
                 ) : (
                   <Text style={styles.title}>{title}</Text>
@@ -477,27 +485,7 @@ function FeelingSlider({
   colors: ThemeColors;
 }) {
   const styles = createStyles(colors);
-  const trackRef = useRef<View | null>(null);
-  const [track, setTrack] = useState({ pageX: 0, width: 0 });
-  const percentage = value == null ? 0 : (value / 10) * 100;
-
-  function measureTrack() {
-    trackRef.current?.measureInWindow((pageX, _pageY, width) => {
-      setTrack({ pageX, width });
-    });
-  }
-
-  function setValueFromPageX(pageX: number) {
-    if (track.width <= 0) {
-      return;
-    }
-
-    const progress = Math.min(
-      1,
-      Math.max(0, (pageX - track.pageX) / track.width),
-    );
-    onChange(Math.min(10, Math.max(0, Math.round(progress * 10))));
-  }
+  const sliderValue = value ?? 0;
 
   return (
     <View style={styles.feeling}>
@@ -505,26 +493,17 @@ function FeelingSlider({
         <Text style={styles.feelingEndpoint}>Awful</Text>
         <Text style={styles.feelingEndpoint}>Outstanding</Text>
       </View>
-      <View
-        ref={trackRef}
-        style={styles.sliderTrack}
-        onLayout={() => requestAnimationFrame(measureTrack)}
-        onMoveShouldSetResponder={() => true}
-        onResponderGrant={(event) => {
-          measureTrack();
-          setValueFromPageX(event.nativeEvent.pageX);
-        }}
-        onResponderMove={(event) => setValueFromPageX(event.nativeEvent.pageX)}
-        onStartShouldSetResponder={() => true}
-      >
-        <View style={styles.sliderRail} />
-        <View style={[styles.sliderFill, { width: `${percentage}%` }]} />
-        {value == null ? null : (
-          <View style={[styles.sliderThumb, { left: `${percentage}%` }]}>
-            <Text style={styles.sliderThumbText}>{value}</Text>
-          </View>
-        )}
-      </View>
+      <ExpoSlider
+        maximumTrackTintColor={colors.border}
+        maximumValue={10}
+        minimumTrackTintColor={colors.accent}
+        minimumValue={0}
+        step={1}
+        style={styles.slider}
+        thumbTintColor={colors.accent}
+        value={sliderValue}
+        onValueChange={(nextValue) => onChange(Math.round(nextValue))}
+      />
       {value == null ? (
         <Text style={styles.feelingHint}>No feeling rating selected.</Text>
       ) : (
@@ -555,11 +534,7 @@ function createStyles(colors: ThemeColors) {
       borderTopLeftRadius: 24,
       borderTopRightRadius: 24,
       backgroundColor: colors.card,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: -12 },
-      shadowOpacity: 0.22,
-      shadowRadius: 24,
-      elevation: 18,
+      boxShadow: '0 -12px 24px rgba(0, 0, 0, 0.22)',
     },
     handle: {
       alignSelf: 'center',
@@ -768,41 +743,9 @@ function createStyles(colors: ThemeColors) {
       fontSize: 13,
       fontWeight: '800',
     },
-    sliderTrack: {
+    slider: {
       height: 40,
-      justifyContent: 'center',
-    },
-    sliderRail: {
-      position: 'absolute',
-      right: 0,
-      left: 0,
-      height: 8,
-      borderRadius: 999,
-      backgroundColor: colors.border,
-    },
-    sliderFill: {
-      position: 'absolute',
-      left: 0,
-      height: 8,
-      borderRadius: 999,
-      backgroundColor: colors.success,
-    },
-    sliderThumb: {
-      position: 'absolute',
-      width: 34,
-      height: 34,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 3,
-      borderColor: colors.card,
-      borderRadius: 999,
-      backgroundColor: colors.success,
-      transform: [{ translateX: -17 }],
-    },
-    sliderThumbText: {
-      color: '#fff',
-      fontSize: 13,
-      fontWeight: '900',
+      width: '100%',
     },
     feelingHint: {
       color: colors.mutedText,

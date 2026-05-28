@@ -1,19 +1,24 @@
-import { useRouter } from 'expo-router';
+import { Host, Switch as ExpoSwitch } from '@expo/ui';
+import {
+  SegmentedControl,
+  type NativeSegmentedControlChangeEvent,
+} from '@expo/ui/community/segmented-control';
 import { useState, type ReactNode } from 'react';
 import {
   Modal,
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 
+import { NativeTextInput } from '../src/components/native-text-input';
 import {
   type ThemeColors,
+  type ResolvedTheme,
   useRideSettings,
+  useResolvedTheme,
   useThemeColors,
 } from '../src/features/settings/settings';
 import type { RideSettings } from '../src/features/ride/types';
@@ -43,13 +48,16 @@ function OptionButton<T extends string>({
 
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: isSelected }}
+      hitSlop={4}
       style={({ pressed }) => [
         styles.optionButton,
         isSelected && styles.optionButtonSelected,
         pressed && styles.optionButtonPressed,
         pressed && isSelected && styles.selectedButtonPressed,
       ]}
-      onPressIn={() => onSelect(value)}
+      onPress={() => onSelect(value)}
     >
       <Text
         style={[
@@ -60,6 +68,59 @@ function OptionButton<T extends string>({
         {label}
       </Text>
     </Pressable>
+  );
+}
+
+function SegmentedOptionGroup<T extends string>({
+  options,
+  selectedValue,
+  onSelect,
+  styles,
+  tintColor,
+}: {
+  options: readonly { label: string; value: T }[];
+  selectedValue: T;
+  onSelect: (value: T) => void;
+  styles: ReturnType<typeof createStyles>;
+  tintColor: string;
+}) {
+  const selectedIndex = Math.max(
+    0,
+    options.findIndex((option) => option.value === selectedValue),
+  );
+
+  function handleChange(event: NativeSegmentedControlChangeEvent) {
+    const option = options[event.nativeEvent.selectedSegmentIndex];
+
+    if (option) {
+      onSelect(option.value);
+    }
+  }
+
+  return (
+    <SegmentedControl
+      selectedIndex={selectedIndex}
+      style={styles.segmentedControl}
+      tintColor={tintColor}
+      values={options.map((option) => option.label)}
+      onChange={handleChange}
+    />
+  );
+}
+
+function NativeSwitch({
+  colorScheme,
+  onValueChange,
+  value,
+}: {
+  colorScheme: ResolvedTheme;
+  onValueChange: (value: boolean) => void;
+  value: boolean;
+}) {
+  return (
+    <Host colorScheme={colorScheme} matchContents>
+      <ExpoSwitch value={value} onValueChange={onValueChange} />
+    </Host>
   );
 }
 
@@ -162,9 +223,9 @@ function getBluetoothAccessMessage(accessState: BluetoothAccessState) {
 }
 
 export default function SettingsScreen() {
-  const router = useRouter();
   const { settings, isLoading, updateSetting } = useRideSettings();
   const colors = useThemeColors();
+  const resolvedTheme = useResolvedTheme();
   const styles = createStyles(colors);
   const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
@@ -304,26 +365,14 @@ export default function SettingsScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
-        <View style={styles.headerCopy}>
-          <Text style={styles.kicker}>Preferences</Text>
-          <Text style={styles.title}>Settings</Text>
-          <Text style={styles.subtitle}>
-            Keep the ride screen focused and tune everything else here.
-          </Text>
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          style={({ pressed }) => [
-            styles.backToRideButton,
-            pressed && styles.subtleButtonPressed,
-          ]}
-          onPress={() => router.dismissTo('/')}
-        >
-          <Text style={styles.backToRideButtonText}>Back to ride</Text>
-        </Pressable>
-      </View>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      contentInsetAdjustmentBehavior="automatic"
+    >
+      <Text style={styles.subtitle}>
+        Keep the ride screen focused and tune everything else here.
+      </Text>
       {isLoading ? (
         <Text style={styles.muted}>Loading saved preferences...</Text>
       ) : null}
@@ -364,47 +413,29 @@ export default function SettingsScreen() {
         styles={styles}
       >
         <Text style={styles.label}>Units</Text>
-        <View style={styles.rowWrap}>
-          <OptionButton
-            styles={styles}
-            label="Imperial"
-            value="imperial"
-            selectedValue={settings.unitSystem}
-            onSelect={updateUnitSystem}
-          />
-          <OptionButton
-            styles={styles}
-            label="Metric"
-            value="metric"
-            selectedValue={settings.unitSystem}
-            onSelect={updateUnitSystem}
-          />
-        </View>
+        <SegmentedOptionGroup
+          options={[
+            { label: 'Imperial', value: 'imperial' },
+            { label: 'Metric', value: 'metric' },
+          ]}
+          selectedValue={settings.unitSystem}
+          styles={styles}
+          tintColor={colors.accent}
+          onSelect={updateUnitSystem}
+        />
         <View style={styles.divider} />
         <Text style={styles.label}>Theme</Text>
-        <View style={styles.rowWrap}>
-          <OptionButton
-            styles={styles}
-            label="System"
-            value="system"
-            selectedValue={settings.theme}
-            onSelect={(value) => update('theme', value)}
-          />
-          <OptionButton
-            styles={styles}
-            label="Light"
-            value="light"
-            selectedValue={settings.theme}
-            onSelect={(value) => update('theme', value)}
-          />
-          <OptionButton
-            styles={styles}
-            label="Dark"
-            value="dark"
-            selectedValue={settings.theme}
-            onSelect={(value) => update('theme', value)}
-          />
-        </View>
+        <SegmentedOptionGroup
+          options={[
+            { label: 'System', value: 'system' },
+            { label: 'Light', value: 'light' },
+            { label: 'Dark', value: 'dark' },
+          ]}
+          selectedValue={settings.theme}
+          styles={styles}
+          tintColor={colors.accent}
+          onSelect={(value) => update('theme', value)}
+        />
       </Section>
 
       <Section
@@ -438,7 +469,9 @@ export default function SettingsScreen() {
             <Text style={styles.label}>
               Weight ({settings.unitSystem === 'imperial' ? 'lb' : 'kg'})
             </Text>
-            <TextInput
+            <NativeTextInput
+              accessibilityLabel={`Weight in ${settings.unitSystem === 'imperial' ? 'pounds' : 'kilograms'}`}
+              colorScheme={resolvedTheme}
               keyboardType="decimal-pad"
               placeholder={settings.unitSystem === 'imperial' ? '175' : '79'}
               placeholderTextColor={colors.mutedText}
@@ -457,7 +490,9 @@ export default function SettingsScreen() {
             <Text style={styles.label}>
               Height ({settings.unitSystem === 'imperial' ? 'in' : 'cm'})
             </Text>
-            <TextInput
+            <NativeTextInput
+              accessibilityLabel={`Height in ${settings.unitSystem === 'imperial' ? 'inches' : 'centimeters'}`}
+              colorScheme={resolvedTheme}
               keyboardType="decimal-pad"
               placeholder={settings.unitSystem === 'imperial' ? '70' : '178'}
               placeholderTextColor={colors.mutedText}
@@ -474,7 +509,9 @@ export default function SettingsScreen() {
           </View>
           <View style={styles.profileField}>
             <Text style={styles.label}>Age</Text>
-            <TextInput
+            <NativeTextInput
+              accessibilityLabel="Age"
+              colorScheme={resolvedTheme}
               keyboardType="number-pad"
               placeholder="35"
               placeholderTextColor={colors.mutedText}
@@ -487,7 +524,9 @@ export default function SettingsScreen() {
           </View>
           <View style={styles.profileField}>
             <Text style={styles.label}>Max HR (bpm)</Text>
-            <TextInput
+            <NativeTextInput
+              accessibilityLabel="Maximum heart rate in beats per minute"
+              colorScheme={resolvedTheme}
               keyboardType="number-pad"
               maxLength={3}
               placeholder={
@@ -515,7 +554,8 @@ export default function SettingsScreen() {
               Prevent sleep only while viewing an active or paused ride.
             </Text>
           </View>
-          <Switch
+          <NativeSwitch
+            colorScheme={resolvedTheme}
             value={settings.keepAwakeDuringRide}
             onValueChange={(value) => update('keepAwakeDuringRide', value)}
           />
@@ -527,7 +567,8 @@ export default function SettingsScreen() {
               Dim only while viewing an active or paused ride.
             </Text>
           </View>
-          <Switch
+          <NativeSwitch
+            colorScheme={resolvedTheme}
             value={settings.autoDimScreen}
             onValueChange={(value) => update('autoDimScreen', value)}
           />
@@ -539,7 +580,8 @@ export default function SettingsScreen() {
               Ignore stopped GPS points while recording.
             </Text>
           </View>
-          <Switch
+          <NativeSwitch
+            colorScheme={resolvedTheme}
             value={settings.autoPause}
             onValueChange={(value) => update('autoPause', value)}
           />
@@ -551,7 +593,8 @@ export default function SettingsScreen() {
               Start a new lap automatically by split distance or time.
             </Text>
           </View>
-          <Switch
+          <NativeSwitch
+            colorScheme={resolvedTheme}
             value={settings.autoLap}
             onValueChange={(value) => update('autoLap', value)}
           />
@@ -573,6 +616,7 @@ export default function SettingsScreen() {
             </Text>
           </View>
           <Pressable
+            accessibilityRole="button"
             style={({ pressed }) => [
               styles.deviceButton,
               pressed && styles.accentButtonPressed,
@@ -593,6 +637,7 @@ export default function SettingsScreen() {
         </View>
         {settings.connectedHeartRateDevice ? (
           <Pressable
+            accessibilityRole="button"
             style={({ pressed }) => [
               styles.clearDeviceButton,
               pressed && styles.dangerButtonPressed,
@@ -619,44 +664,32 @@ export default function SettingsScreen() {
         styles={styles}
       >
         <Text style={styles.label}>Ascent source</Text>
-        <View style={styles.rowWrap}>
-          <OptionButton
-            styles={styles}
-            label="GPS only"
-            value="gps-only"
-            selectedValue={settings.ascentSource}
-            onSelect={(value) => update('ascentSource', value)}
-          />
-          <OptionButton
-            styles={styles}
-            label="Prefer sensors"
-            value="barometer-preferred"
-            selectedValue={settings.ascentSource}
-            onSelect={(value) => update('ascentSource', value)}
-          />
-        </View>
+        <SegmentedOptionGroup
+          options={[
+            { label: 'GPS only', value: 'gps-only' },
+            { label: 'Prefer sensors', value: 'barometer-preferred' },
+          ]}
+          selectedValue={settings.ascentSource}
+          styles={styles}
+          tintColor={colors.accent}
+          onSelect={(value) => update('ascentSource', value)}
+        />
         <Text style={styles.muted}>
           GPS only favors battery life. Prefer sensors uses the barometer when
           available for better climbing precision.
         </Text>
         <View style={styles.divider} />
         <Text style={styles.label}>GPS mode</Text>
-        <View style={styles.rowWrap}>
-          <OptionButton
-            styles={styles}
-            label="Standard"
-            value="standard"
-            selectedValue={settings.gpsAccuracy}
-            onSelect={(value) => update('gpsAccuracy', value)}
-          />
-          <OptionButton
-            styles={styles}
-            label="Best"
-            value="best"
-            selectedValue={settings.gpsAccuracy}
-            onSelect={(value) => update('gpsAccuracy', value)}
-          />
-        </View>
+        <SegmentedOptionGroup
+          options={[
+            { label: 'Standard', value: 'standard' },
+            { label: 'Best', value: 'best' },
+          ]}
+          selectedValue={settings.gpsAccuracy}
+          styles={styles}
+          tintColor={colors.accent}
+          onSelect={(value) => update('gpsAccuracy', value)}
+        />
         <Text style={styles.muted}>
           Standard favors battery life. Best is intended for navigation or short
           rides where maximum precision matters.
@@ -668,29 +701,29 @@ export default function SettingsScreen() {
         subtitle="Choose automatic lap markers (1-100)."
         styles={styles}
       >
-        <View style={styles.rowWrap}>
-          <OptionButton
-            styles={styles}
-            label="Distance"
-            value="distance"
-            selectedValue={settings.splitType}
-            onSelect={(value) => update('splitType', value)}
-          />
-          <OptionButton
-            styles={styles}
-            label="Time"
-            value="time"
-            selectedValue={settings.splitType}
-            onSelect={(value) => update('splitType', value)}
-          />
-        </View>
+        <SegmentedOptionGroup
+          options={[
+            { label: 'Distance', value: 'distance' },
+            { label: 'Time', value: 'time' },
+          ]}
+          selectedValue={settings.splitType}
+          styles={styles}
+          tintColor={colors.accent}
+          onSelect={(value) => update('splitType', value)}
+        />
         <View style={styles.splitValueField}>
           <Text style={styles.label}>
             {settings.splitType === 'distance'
               ? `Auto-lap every (${settings.unitSystem === 'imperial' ? 'mi' : 'km'})`
               : 'Auto-lap every (min)'}
           </Text>
-          <TextInput
+          <NativeTextInput
+            accessibilityLabel={
+              settings.splitType === 'distance'
+                ? `Auto-lap distance in ${settings.unitSystem === 'imperial' ? 'miles' : 'kilometers'}`
+                : 'Auto-lap duration in minutes'
+            }
+            colorScheme={resolvedTheme}
             key={`${settings.splitType}-${settings.unitSystem}`}
             defaultValue={formatSplitValue(settings)}
             keyboardType="number-pad"
@@ -698,8 +731,8 @@ export default function SettingsScreen() {
             placeholder="10"
             placeholderTextColor={colors.mutedText}
             style={[styles.input, styles.splitValueInput]}
-            onEndEditing={(event) => commitSplitValue(event.nativeEvent.text)}
             onChangeText={updateSplitValue}
+            onEndEditingText={commitSplitValue}
           />
         </View>
       </Section>
@@ -710,47 +743,29 @@ export default function SettingsScreen() {
         styles={styles}
       >
         <Text style={styles.label}>Map type</Text>
-        <View style={styles.rowWrap}>
-          <OptionButton
-            styles={styles}
-            label="Default"
-            value="standard"
-            selectedValue={settings.mapType}
-            onSelect={(value) => update('mapType', value)}
-          />
-          <OptionButton
-            styles={styles}
-            label="Outdoor"
-            value="outdoor"
-            selectedValue={settings.mapType}
-            onSelect={(value) => update('mapType', value)}
-          />
-        </View>
+        <SegmentedOptionGroup
+          options={[
+            { label: 'Default', value: 'standard' },
+            { label: 'Outdoor', value: 'outdoor' },
+          ]}
+          selectedValue={settings.mapType}
+          styles={styles}
+          tintColor={colors.accent}
+          onSelect={(value) => update('mapType', value)}
+        />
         <View style={styles.divider} />
         <Text style={styles.label}>Route profile</Text>
-        <View style={styles.rowWrap}>
-          <OptionButton
-            styles={styles}
-            label="Bike"
-            value="bike"
-            selectedValue={settings.routeProfile}
-            onSelect={(value) => update('routeProfile', value)}
-          />
-          <OptionButton
-            styles={styles}
-            label="Roadbike"
-            value="roadbike"
-            selectedValue={settings.routeProfile}
-            onSelect={(value) => update('routeProfile', value)}
-          />
-          <OptionButton
-            styles={styles}
-            label="MTB"
-            value="mtb"
-            selectedValue={settings.routeProfile}
-            onSelect={(value) => update('routeProfile', value)}
-          />
-        </View>
+        <SegmentedOptionGroup
+          options={[
+            { label: 'Bike', value: 'bike' },
+            { label: 'Roadbike', value: 'roadbike' },
+            { label: 'MTB', value: 'mtb' },
+          ]}
+          selectedValue={settings.routeProfile}
+          styles={styles}
+          tintColor={colors.accent}
+          onSelect={(value) => update('routeProfile', value)}
+        />
         <View style={styles.divider} />
         <View style={styles.switchRow}>
           <View style={styles.switchCopy}>
@@ -808,6 +823,7 @@ export default function SettingsScreen() {
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Add Heart Rate Device</Text>
             <Pressable
+              accessibilityRole="button"
               style={({ pressed }) => pressed && styles.linkButtonPressed}
               onPress={() => setIsDeviceModalOpen(false)}
             >
@@ -819,6 +835,7 @@ export default function SettingsScreen() {
             the standard Bluetooth Heart Rate Service.
           </Text>
           <Pressable
+            accessibilityRole="button"
             disabled={isScanning}
             style={({ pressed }) => [
               styles.deviceButton,
@@ -841,6 +858,7 @@ export default function SettingsScreen() {
           {scanError ? <Text style={styles.error}>{scanError}</Text> : null}
           {heartRateDevices.map((device) => (
             <Pressable
+              accessibilityRole="button"
               key={device.id}
               style={({ pressed }) => [
                 styles.deviceRow,
@@ -876,7 +894,7 @@ function createStyles(colors: ThemeColors) {
     content: {
       gap: 16,
       paddingHorizontal: 16,
-      paddingTop: 58,
+      paddingTop: 16,
       paddingBottom: 32,
     },
     header: {
@@ -960,10 +978,7 @@ function createStyles(colors: ThemeColors) {
       borderRadius: 24,
       backgroundColor: colors.card,
       padding: 16,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: 0.06,
-      shadowRadius: 16,
+      boxShadow: '0 8px 16px rgba(0, 0, 0, 0.06)',
     },
     sectionHeader: {
       gap: 4,
@@ -984,6 +999,9 @@ function createStyles(colors: ThemeColors) {
       flexDirection: 'row',
       flexWrap: 'wrap',
       gap: 8,
+    },
+    segmentedControl: {
+      height: 36,
     },
     switchRow: {
       flexDirection: 'row',

@@ -797,6 +797,7 @@ function RideMapComponent({
       <View style={styles.mapActions} pointerEvents="box-none">
         <Pressable
           accessibilityLabel="Center map"
+          accessibilityRole="button"
           hitSlop={8}
           style={({ pressed }) => [
             styles.mapActionButton,
@@ -816,6 +817,7 @@ function RideMapComponent({
         {wholeRouteCoordinates.length > 1 ? (
           <Pressable
             accessibilityLabel="Show whole route"
+            accessibilityRole="button"
             hitSlop={8}
             style={({ pressed }) => [
               styles.mapActionButton,
@@ -831,6 +833,7 @@ function RideMapComponent({
             accessibilityLabel={
               isNavigating ? 'Cancel navigation' : 'Remove planned route'
             }
+            accessibilityRole="button"
             hitSlop={8}
             style={({ pressed }) => [
               styles.mapActionButton,
@@ -906,11 +909,7 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: '#006d66',
       paddingHorizontal: 14,
       paddingVertical: 16,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 5 },
-      shadowOpacity: 0.24,
-      shadowRadius: 14,
-      elevation: 8,
+      boxShadow: '0 5px 14px rgba(0, 0, 0, 0.24)',
     },
     navigationGlyph: {
       minWidth: 66,
@@ -952,11 +951,7 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.border,
       borderRadius: 999,
       backgroundColor: colors.card,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 3 },
-      shadowOpacity: 0.18,
-      shadowRadius: 7,
-      elevation: 4,
+      boxShadow: '0 3px 7px rgba(0, 0, 0, 0.18)',
     },
     mapActionButtonPressed: {
       opacity: 0.72,

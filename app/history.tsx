@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useRouter } from 'expo-router';
 import {
   Alert,
+  FlatList,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -33,7 +32,6 @@ import { HistoryRouteMap } from '../src/features/ride/HistoryRouteMap';
 import type { RidePoint } from '../src/features/ride/types';
 
 export default function HistoryScreen() {
-  const router = useRouter();
   const { settings } = useRideSettings();
   const colors = useThemeColors();
   const styles = createStyles(colors);
@@ -132,31 +130,25 @@ export default function HistoryScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Ride History</Text>
-        <Pressable
-          accessibilityRole="button"
-          style={({ pressed }) => [
-            styles.backToRideButton,
-            pressed && styles.linkPressed,
-          ]}
-          onPress={() => router.dismissTo('/')}
-        >
-          <Text style={styles.backToRideButtonText}>Back to ride</Text>
-        </Pressable>
-      </View>
-
-      {isLoading ? (
-        <Text style={styles.muted}>Loading saved rides...</Text>
-      ) : null}
-      {!isLoading && rides.length === 0 ? (
-        <Text style={styles.muted}>
-          No saved rides yet. Stop a ride to save it here.
-        </Text>
-      ) : null}
-
-      {rides.map((ride) => (
+    <FlatList
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      contentInsetAdjustmentBehavior="automatic"
+      data={rides}
+      keyExtractor={(ride) => ride.id}
+      ListHeaderComponent={
+        isLoading ? (
+          <Text style={styles.muted}>Loading saved rides...</Text>
+        ) : null
+      }
+      ListEmptyComponent={
+        !isLoading ? (
+          <Text style={styles.muted}>
+            No saved rides yet. Stop a ride to save it here.
+          </Text>
+        ) : null
+      }
+      renderItem={({ item: ride }) => (
         <View key={ride.id} style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardTitleBlock}>
@@ -256,8 +248,8 @@ export default function HistoryScreen() {
             ) : null}
           </View>
         </View>
-      ))}
-    </ScrollView>
+      )}
+    />
   );
 }
 
@@ -287,7 +279,7 @@ function createStyles(colors: ThemeColors) {
     content: {
       gap: 18,
       paddingHorizontal: 20,
-      paddingTop: 58,
+      paddingTop: 16,
       paddingBottom: 24,
     },
     header: {

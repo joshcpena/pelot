@@ -345,6 +345,7 @@ export function DashboardGrid({
       {cards}
       {isEditing && canAddCard ? (
         <Pressable
+          accessibilityRole="button"
           style={({ pressed }) => [
             styles.addTile,
             { height: rowHeight },
@@ -476,6 +477,8 @@ function DashboardMetricCard({
   styles: ReturnType<typeof createStyles>;
 }) {
   const [holdFeedback] = useState(() => new Animated.Value(0));
+  const cardLabel =
+    dashboardMetricById.get(card.metricId)?.label ?? 'Dashboard metric';
 
   function resetHoldFeedback() {
     holdFeedback.stopAnimation();
@@ -520,6 +523,9 @@ function DashboardMetricCard({
       ]}
     >
       <Pressable
+        accessibilityHint="Press and hold to edit this metric."
+        accessibilityLabel={cardLabel}
+        accessibilityRole="button"
         delayLongPress={ENTER_EDIT_DELAY_MS}
         onLongPress={onLongPressCard ? () => onLongPressCard(card) : undefined}
         onPressIn={startHoldFeedback}
@@ -661,6 +667,9 @@ function EditDashboardCard({
         ]}
       >
         <Pressable
+          accessibilityHint="Drag to reorder, or tap to customize this metric."
+          accessibilityLabel={label}
+          accessibilityRole="button"
           style={[styles.editCard, isActive && styles.editCardPlaceholder]}
           onPressIn={() => onStartDrag(card)}
           onPress={() => {
@@ -684,6 +693,7 @@ function EditDashboardCard({
         />
         <Pressable
           accessibilityLabel={`Remove ${label}`}
+          accessibilityRole="button"
           style={({ pressed }) => [
             styles.removeBadge,
             pressed && styles.removeBadgePressed,
@@ -748,6 +758,7 @@ function DashboardEmptySpaceEditTarget({
       <Pressable
         accessibilityHint="Press and hold to edit this dashboard screen."
         accessibilityLabel="Empty dashboard screen"
+        accessibilityRole="button"
         delayLongPress={ENTER_EDIT_DELAY_MS}
         onLongPress={onLongPress}
         onPressIn={startHoldFeedback}
@@ -1494,11 +1505,7 @@ function createStyles(colors: ThemeColors) {
       borderWidth: 2,
       borderColor: colors.accent,
       backgroundColor: colors.card,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: 0.24,
-      shadowRadius: 14,
-      elevation: 12,
+      boxShadow: '0 8px 14px rgba(0, 0, 0, 0.24)',
     },
     dropActive: {
       backgroundColor: colors.accentSoft,

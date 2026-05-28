@@ -42,6 +42,7 @@ export function RideMap({
 
   return (
     <Pressable
+      accessibilityRole={onLongPress ? 'button' : undefined}
       delayLongPress={550}
       onLongPress={onLongPress}
       style={styles.container}

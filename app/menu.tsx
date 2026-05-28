@@ -1,6 +1,5 @@
 import { Link } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   type ThemeColors,
@@ -30,15 +29,18 @@ const menuItems = [
 
 export default function MenuScreen() {
   const colors = useThemeColors();
-  const insets = useSafeAreaInsets();
-  const styles = createStyles(colors, insets.top);
+  const styles = createStyles(colors);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      contentInsetAdjustmentBehavior="automatic"
+    >
       <View style={styles.header}>
-        <Text style={styles.menuLabel}>Menu</Text>
         <Link dismissTo href="/" asChild>
           <Pressable
+            accessibilityRole="button"
             style={({ pressed }) => [
               styles.closeLink,
               pressed && styles.closeLinkPressed,
@@ -53,6 +55,7 @@ export default function MenuScreen() {
         {menuItems.map((item) => (
           <Link key={item.href} href={item.href} asChild>
             <Pressable
+              accessibilityRole="link"
               style={({ pressed }) => [
                 styles.menuItem,
                 pressed ? styles.menuItemPressed : null,
@@ -71,7 +74,7 @@ export default function MenuScreen() {
   );
 }
 
-function createStyles(colors: ThemeColors, topInset: number) {
+function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     container: {
       flex: 1,
@@ -80,13 +83,13 @@ function createStyles(colors: ThemeColors, topInset: number) {
     content: {
       gap: 20,
       paddingHorizontal: 20,
-      paddingTop: Math.max(topInset + 28, 52),
+      paddingTop: 16,
       paddingBottom: 32,
     },
     header: {
       flexDirection: 'row',
       alignItems: 'flex-start',
-      justifyContent: 'space-between',
+      justifyContent: 'flex-end',
       gap: 12,
     },
     menuLabel: {
@@ -120,10 +123,7 @@ function createStyles(colors: ThemeColors, topInset: number) {
       borderRadius: 24,
       backgroundColor: colors.card,
       padding: 18,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 10 },
-      shadowOpacity: 0.08,
-      shadowRadius: 18,
+      boxShadow: '0 10px 18px rgba(0, 0, 0, 0.08)',
     },
     menuItemPressed: {
       opacity: 0.72,

@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react';
 import * as Location from 'expo-location';
-import { useRouter } from 'expo-router';
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import {
   type ThemeColors,
@@ -19,7 +25,6 @@ type PermissionState = {
 };
 
 export default function PermissionsScreen() {
-  const router = useRouter();
   const colors = useThemeColors();
   const styles = createStyles(colors);
   const [permissions, setPermissions] = useState<PermissionState>({
@@ -79,20 +84,11 @@ export default function PermissionsScreen() {
   }, []);
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Permissions</Text>
-        <Pressable
-          accessibilityRole="button"
-          style={({ pressed }) => [
-            styles.backToRideButton,
-            pressed && styles.subtleButtonPressed,
-          ]}
-          onPress={() => router.dismissTo('/')}
-        >
-          <Text style={styles.backToRideButtonText}>Back to ride</Text>
-        </Pressable>
-      </View>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      contentInsetAdjustmentBehavior="automatic"
+    >
       <Text style={styles.copy}>
         Pelot needs location permission to record speed, distance, and route
         points. Background location will be used in the next recording
@@ -103,6 +99,7 @@ export default function PermissionsScreen() {
         <Text style={styles.label}>Foreground location</Text>
         <Text style={styles.value}>{permissions.foreground}</Text>
         <Pressable
+          accessibilityRole="button"
           style={({ pressed }) => [
             styles.button,
             pressed && styles.buttonPressed,
@@ -117,6 +114,7 @@ export default function PermissionsScreen() {
         <Text style={styles.label}>Background location</Text>
         <Text style={styles.value}>{permissions.background}</Text>
         <Pressable
+          accessibilityRole="button"
           style={({ pressed }) => [
             styles.button,
             pressed && styles.buttonPressed,
@@ -134,6 +132,7 @@ export default function PermissionsScreen() {
           Needed to connect to Garmin watches broadcasting heart rate.
         </Text>
         <Pressable
+          accessibilityRole="button"
           style={({ pressed }) => [
             styles.button,
             pressed && styles.buttonPressed,
@@ -143,7 +142,7 @@ export default function PermissionsScreen() {
           <Text style={styles.buttonText}>Allow Bluetooth</Text>
         </Pressable>
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -151,10 +150,13 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     container: {
       flex: 1,
-      gap: 16,
       backgroundColor: colors.background,
+    },
+    content: {
+      gap: 16,
       paddingHorizontal: 20,
-      paddingTop: 58,
+      paddingTop: 16,
+      paddingBottom: 32,
     },
     header: {
       flexDirection: 'row',

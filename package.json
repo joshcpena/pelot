@@ -16,6 +16,7 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
+    "@expo/ui": "~56.0.14",
     "@maplibre/maplibre-react-native": "^11.2.1",
     "expo": "~56.0.4",
     "expo-battery": "^56.0.4",

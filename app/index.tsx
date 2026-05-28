@@ -1482,6 +1482,8 @@ export default function HomeScreen() {
                 </Text>
                 {visibleRecentRouteDestinations.map((option, index) => (
                   <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: isPlanningRoute }}
                     key={option.id}
                     disabled={isPlanningRoute}
                     style={({ pressed }) => [
@@ -1515,6 +1517,8 @@ export default function HomeScreen() {
                 </Text>
                 {destinationOptions.map((option, index) => (
                   <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: isPlanningRoute }}
                     key={option.id}
                     disabled={isPlanningRoute}
                     style={({ pressed }) => [
@@ -1545,6 +1549,7 @@ export default function HomeScreen() {
         ) : null}
         <View style={styles.modalActions}>
           <Pressable
+            accessibilityRole="button"
             style={({ pressed }) => [
               styles.modalSecondaryButton,
               pressed && styles.subtleButtonPressed,
@@ -1554,6 +1559,10 @@ export default function HomeScreen() {
             <Text style={styles.modalSecondaryButtonText}>Cancel</Text>
           </Pressable>
           <Pressable
+            accessibilityRole="button"
+            accessibilityState={{
+              disabled: isSearchingDestinations || isPlanningRoute,
+            }}
             disabled={isSearchingDestinations || isPlanningRoute}
             style={({ pressed }) => [
               styles.primaryButton,
@@ -1596,6 +1605,7 @@ export default function HomeScreen() {
       />
       <Pressable
         accessibilityLabel="Close menu"
+        accessibilityRole="button"
         style={styles.navigationDismissArea}
         onPress={closeNavigationPanel}
       />
@@ -1623,6 +1633,7 @@ export default function HomeScreen() {
           </View>
           <Pressable
             accessibilityLabel="Close menu"
+            accessibilityRole="button"
             style={({ pressed }) => [
               styles.navigationCloseButton,
               pressed && styles.subtleButtonPressed,
@@ -1636,6 +1647,7 @@ export default function HomeScreen() {
         <View style={styles.navigationList}>
           {navigationItems.map((item) => (
             <Pressable
+              accessibilityRole="button"
               key={item.href}
               style={({ pressed }) => [
                 styles.navigationItem,
@@ -1666,6 +1678,7 @@ export default function HomeScreen() {
             accessibilityLabel="Open menu"
             style={({ pressed }) => [
               styles.menuButton,
+              { top: Math.max(insets.top + 4, 12) },
               pressed && styles.menuButtonPressed,
             ]}
             onPress={openNavigationPanel}
@@ -1853,12 +1866,21 @@ export default function HomeScreen() {
         ) : null}
 
         {isEditingDashboard ? (
-          <View style={styles.editModeControls}>
+          <View
+            style={[
+              styles.editModeControls,
+              { paddingBottom: Math.max(insets.bottom, 10) },
+            ]}
+          >
             <View style={styles.editModeScreenControls}>
               {dashboardScreenCount > 1 ? (
                 <>
                   <Pressable
                     accessibilityLabel="Previous dashboard screen"
+                    accessibilityRole="button"
+                    accessibilityState={{
+                      disabled: visibleDashboardScreenIndex === 0,
+                    }}
                     disabled={visibleDashboardScreenIndex === 0}
                     style={({ pressed }) => [
                       styles.editModeButton,
@@ -1882,6 +1904,11 @@ export default function HomeScreen() {
                   </Pressable>
                   <Pressable
                     accessibilityLabel="Next dashboard screen"
+                    accessibilityRole="button"
+                    accessibilityState={{
+                      disabled:
+                        visibleDashboardScreenIndex >= dashboardScreenCount - 1,
+                    }}
                     disabled={
                       visibleDashboardScreenIndex >= dashboardScreenCount - 1
                     }
@@ -1911,6 +1938,8 @@ export default function HomeScreen() {
             </View>
             {dashboardScreenDrafts.length > 1 ? (
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Remove dashboard screen"
                 style={({ pressed }) => [
                   styles.editModeButton,
                   styles.editModeActionButton,
@@ -1930,6 +1959,7 @@ export default function HomeScreen() {
               </Pressable>
             ) : null}
             <Pressable
+              accessibilityRole="button"
               style={({ pressed }) => [
                 styles.editModeButton,
                 styles.editModeActionButton,
@@ -1947,6 +1977,8 @@ export default function HomeScreen() {
               </Text>
             </Pressable>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Reset dashboard changes"
               style={({ pressed }) => [
                 styles.editModeButton,
                 styles.editModeActionButton,
@@ -1972,6 +2004,8 @@ export default function HomeScreen() {
               </Text>
             </Pressable>
             <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !layoutDraftFits }}
               disabled={!layoutDraftFits}
               style={({ pressed }) => [
                 styles.editModeDoneButton,
@@ -1992,9 +2026,15 @@ export default function HomeScreen() {
             </Pressable>
           </View>
         ) : (
-          <View style={styles.controls}>
+          <View
+            style={[
+              styles.controls,
+              { paddingBottom: Math.max(insets.bottom, 10) },
+            ]}
+          >
             {canStart ? (
               <Pressable
+                accessibilityRole="button"
                 style={({ pressed }) => [
                   styles.routeButton,
                   pressed && styles.routeButtonPressed,
@@ -2015,6 +2055,7 @@ export default function HomeScreen() {
             ) : null}
             {isRecording ? (
               <Pressable
+                accessibilityRole="button"
                 style={({ pressed }) => [
                   styles.routeButton,
                   pressed && styles.routeButtonPressed,
@@ -2035,6 +2076,7 @@ export default function HomeScreen() {
             ) : null}
             {canStart ? (
               <Pressable
+                accessibilityRole="button"
                 style={({ pressed }) => [
                   styles.primaryButton,
                   pressed && styles.primaryButtonPressed,
@@ -2046,6 +2088,7 @@ export default function HomeScreen() {
             ) : null}
             {isRecording ? (
               <Pressable
+                accessibilityRole="button"
                 style={({ pressed }) => [
                   styles.secondaryButton,
                   pressed && styles.dangerSoftButtonPressed,
@@ -2066,6 +2109,8 @@ export default function HomeScreen() {
             ) : null}
             {isPaused ? (
               <Pressable
+                accessibilityHint="Press and hold to finish and save the ride."
+                accessibilityRole="button"
                 style={styles.holdStopButton}
                 delayLongPress={STOP_HOLD_MS}
                 onLongPress={completeStopHold}
@@ -2100,6 +2145,7 @@ export default function HomeScreen() {
             ) : null}
             {isPaused ? (
               <Pressable
+                accessibilityRole="button"
                 style={({ pressed }) => [
                   styles.primaryButton,
                   pressed && styles.primaryButtonPressed,
@@ -2119,6 +2165,7 @@ export default function HomeScreen() {
         {isScreenDimmed ? (
           <Pressable
             accessibilityLabel="Restore screen brightness"
+            accessibilityRole="button"
             style={styles.dimWakeOverlay}
             onPress={() => restoreScreenBrightness().catch(() => undefined)}
           >
@@ -2209,6 +2256,10 @@ export default function HomeScreen() {
                 ) : null}
                 <View style={styles.modalActions}>
                   <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{
+                      disabled: isPromptingWelcomePermissions,
+                    }}
                     disabled={isPromptingWelcomePermissions}
                     style={({ pressed }) => [
                       styles.primaryButton,
@@ -2226,6 +2277,7 @@ export default function HomeScreen() {
                     </Text>
                   </Pressable>
                   <Pressable
+                    accessibilityRole="button"
                     style={({ pressed }) => [
                       styles.modalSecondaryButton,
                       pressed && styles.subtleButtonPressed,
@@ -2247,6 +2299,7 @@ export default function HomeScreen() {
                 </Text>
                 <View style={styles.modalActions}>
                   <Pressable
+                    accessibilityRole="button"
                     style={({ pressed }) => [
                       styles.modalSecondaryButton,
                       pressed && styles.subtleButtonPressed,
@@ -2256,6 +2309,7 @@ export default function HomeScreen() {
                     <Text style={styles.modalSecondaryButtonText}>Back</Text>
                   </Pressable>
                   <Pressable
+                    accessibilityRole="button"
                     style={({ pressed }) => [
                       styles.primaryButton,
                       pressed && styles.primaryButtonPressed,
@@ -2447,6 +2501,7 @@ function DashboardMetricPickerModal({
         <View style={styles.modalHeader}>
           <Text style={styles.modalTitle}>Choose Metric</Text>
           <Pressable
+            accessibilityRole="button"
             style={({ pressed }) => pressed && styles.linkButtonPressed}
             onPress={onClose}
           >
@@ -2463,6 +2518,8 @@ function DashboardMetricPickerModal({
 
                 return (
                   <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: !canSelect }}
                     key={metric.id}
                     disabled={!canSelect}
                     style={({ pressed }) => [
@@ -2551,6 +2608,7 @@ function DashboardSizePickerModal({
           >
             {card ? (
               <Pressable
+                accessibilityRole="button"
                 style={({ pressed }) => [
                   styles.metricChangeButton,
                   pressed && styles.routeButtonPressed,
@@ -2589,6 +2647,11 @@ function DashboardSizePickerModal({
 
                       return (
                         <Pressable
+                          accessibilityRole="button"
+                          accessibilityState={{
+                            disabled: !canSelect,
+                            selected: card?.span === span,
+                          }}
                           key={span}
                           disabled={!canSelect}
                           style={({ pressed }) => [
@@ -2717,11 +2780,7 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.card,
       paddingHorizontal: 12,
       paddingVertical: 6,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.14,
-      shadowRadius: 10,
-      elevation: 6,
+      boxShadow: '0 4px 10px rgba(0, 0, 0, 0.14)',
     },
     editModeStatusTitle: {
       color: colors.primaryText,
@@ -2832,7 +2891,6 @@ function createStyles(colors: ThemeColors) {
     },
     menuButton: {
       position: 'absolute',
-      top: 44,
       right: 10,
       zIndex: 10,
       width: 44,
@@ -2889,11 +2947,7 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.border,
       backgroundColor: colors.card,
       paddingHorizontal: 18,
-      shadowColor: '#000',
-      shadowOffset: { width: -12, height: 0 },
-      shadowOpacity: 0.22,
-      shadowRadius: 24,
-      elevation: 12,
+      boxShadow: '-12px 0 24px rgba(0, 0, 0, 0.22)',
     },
     navigationHeader: {
       flexDirection: 'row',
