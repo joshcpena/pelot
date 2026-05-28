@@ -75,6 +75,7 @@ function dedupeRidePointRows(rows: RidePointRow[]) {
 
 export type RideSummary = {
   id: string;
+  title: string | null;
   startedAt: number;
   endedAt: number | null;
   elapsedSeconds: number;
@@ -82,9 +83,16 @@ export type RideSummary = {
   distanceMeters: number;
   ascentMeters: number;
   activeCaloriesKcal: number | null;
+  feelingRating: number | null;
   averageSpeedMps: number;
   maxSpeedMps: number;
   unitPreference: UnitSystem;
+};
+
+export type FinishedRideSummary = {
+  summary: RideSummary;
+  points: RidePoint[];
+  splits: RideSplit[];
 };
 
 export type RideSplit = {
@@ -98,6 +106,7 @@ export type RideSplit = {
 
 type RideSummaryRow = {
   id: string;
+  title: string | null;
   started_at: number;
   ended_at: number | null;
   elapsed_seconds: number;
@@ -105,6 +114,7 @@ type RideSummaryRow = {
   distance_meters: number;
   ascent_meters: number;
   active_calories_kcal: number | null;
+  feeling_rating: number | null;
   average_speed_mps: number;
   max_speed_mps: number;
   unit_preference: UnitSystem;
@@ -271,6 +281,43 @@ export async function deleteRide(rideId: string) {
   await db.runAsync('DELETE FROM rides WHERE id = ?', rideId);
 }
 
+export async function updateRideDetails(
+  rideId: string,
+  details: { title?: string | null; feelingRating?: number | null },
+) {
+  await initializeDatabase();
+  const db = await getDatabase();
+  const title =
+    details.title === undefined ? undefined : details.title?.trim() || null;
+  const feelingRating =
+    details.feelingRating == null
+      ? null
+      : Math.min(10, Math.max(1, Math.round(details.feelingRating)));
+
+  if (title !== undefined && details.feelingRating !== undefined) {
+    await db.runAsync(
+      'UPDATE rides SET title = ?, feeling_rating = ? WHERE id = ?',
+      title,
+      feelingRating,
+      rideId,
+    );
+    return;
+  }
+
+  if (title !== undefined) {
+    await db.runAsync('UPDATE rides SET title = ? WHERE id = ?', title, rideId);
+    return;
+  }
+
+  if (details.feelingRating !== undefined) {
+    await db.runAsync(
+      'UPDATE rides SET feeling_rating = ? WHERE id = ?',
+      feelingRating,
+      rideId,
+    );
+  }
+}
+
 export function calculateMetricsFromPoints(points: RidePoint[]): RideMetrics {
   let distanceMeters = 0;
   let ascentMeters = 0;
@@ -422,7 +469,7 @@ export async function finishRide(
   rideId: string,
   fallbackMetrics: RideMetrics,
   settings: RideSettings,
-) {
+): Promise<FinishedRideSummary> {
   const points = await loadRidePoints(rideId);
   const metrics = withEstimatedCalories(
     points.length > 1 ? calculateMetricsFromPoints(points) : fallbackMetrics,
@@ -430,6 +477,7 @@ export async function finishRide(
   );
   const splits = points.length > 1 ? buildSplits(points, settings) : [];
   const db = await getDatabase();
+  const endedAt = Date.now();
 
   await db.runAsync(
     `UPDATE rides
@@ -442,7 +490,7 @@ export async function finishRide(
          average_speed_mps = ?,
          max_speed_mps = ?
      WHERE id = ?`,
-    Date.now(),
+    endedAt,
     metrics.elapsedSeconds || fallbackMetrics.elapsedSeconds,
     metrics.movingSeconds,
     metrics.distanceMeters,
@@ -455,16 +503,57 @@ export async function finishRide(
 
   await replaceRideSplits(rideId, splits);
 
-  return metrics.elapsedSeconds
+  const savedMetrics = metrics.elapsedSeconds
     ? metrics
     : { ...metrics, elapsedSeconds: fallbackMetrics.elapsedSeconds };
+
+  const summary = await loadRideSummary(rideId);
+
+  return {
+    summary: summary ?? {
+      id: rideId,
+      title: null,
+      startedAt: savedMetrics.startedAt ?? fallbackMetrics.startedAt ?? endedAt,
+      endedAt,
+      elapsedSeconds: savedMetrics.elapsedSeconds,
+      movingSeconds: savedMetrics.movingSeconds,
+      distanceMeters: savedMetrics.distanceMeters,
+      ascentMeters: savedMetrics.ascentMeters,
+      activeCaloriesKcal: savedMetrics.activeCaloriesKcal,
+      feelingRating: null,
+      averageSpeedMps: savedMetrics.averageSpeedMps,
+      maxSpeedMps: savedMetrics.maxSpeedMps,
+      unitPreference: settings.unitSystem,
+    },
+    points,
+    splits,
+  };
 }
 
-export async function loadRecentRides(limit = 10) {
+function toRideSummary(row: RideSummaryRow): RideSummary {
+  return {
+    id: row.id,
+    title: row.title,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    elapsedSeconds: row.elapsed_seconds,
+    movingSeconds: row.moving_seconds,
+    distanceMeters: row.distance_meters,
+    ascentMeters: row.ascent_meters,
+    activeCaloriesKcal: row.active_calories_kcal,
+    feelingRating: row.feeling_rating,
+    averageSpeedMps: row.average_speed_mps,
+    maxSpeedMps: row.max_speed_mps,
+    unitPreference: row.unit_preference,
+  };
+}
+
+export async function loadRideSummary(rideId: string) {
   await initializeDatabase();
   const db = await getDatabase();
   const rows = await db.getAllAsync<RideSummaryRow>(
     `SELECT id,
+            title,
             started_at,
             ended_at,
             elapsed_seconds,
@@ -472,6 +561,33 @@ export async function loadRecentRides(limit = 10) {
             distance_meters,
             ascent_meters,
             active_calories_kcal,
+            feeling_rating,
+            average_speed_mps,
+            max_speed_mps,
+            unit_preference
+     FROM rides
+     WHERE id = ?
+     LIMIT 1`,
+    rideId,
+  );
+
+  return rows[0] ? toRideSummary(rows[0]) : null;
+}
+
+export async function loadRecentRides(limit = 10) {
+  await initializeDatabase();
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<RideSummaryRow>(
+    `SELECT id,
+            title,
+            started_at,
+            ended_at,
+            elapsed_seconds,
+            moving_seconds,
+            distance_meters,
+            ascent_meters,
+            active_calories_kcal,
+            feeling_rating,
             average_speed_mps,
             max_speed_mps,
             unit_preference
@@ -482,19 +598,7 @@ export async function loadRecentRides(limit = 10) {
     limit,
   );
 
-  return rows.map((row) => ({
-    id: row.id,
-    startedAt: row.started_at,
-    endedAt: row.ended_at,
-    elapsedSeconds: row.elapsed_seconds,
-    movingSeconds: row.moving_seconds,
-    distanceMeters: row.distance_meters,
-    ascentMeters: row.ascent_meters,
-    activeCaloriesKcal: row.active_calories_kcal,
-    averageSpeedMps: row.average_speed_mps,
-    maxSpeedMps: row.max_speed_mps,
-    unitPreference: row.unit_preference,
-  }));
+  return rows.map(toRideSummary);
 }
 
 export async function loadRideSplits(rideId: string) {

@@ -518,11 +518,7 @@ function RideMapComponent({
   }, [isStyleLoaded, onLoadStateChange]);
 
   useEffect(() => {
-    if (
-      !isCameraCentered ||
-      !isStyleLoaded ||
-      !rideCoordinate
-    ) {
+    if (!isCameraCentered || !isStyleLoaded || !rideCoordinate) {
       return;
     }
 
@@ -549,11 +545,7 @@ function RideMapComponent({
   ]);
 
   useEffect(() => {
-    if (
-      !isStyleLoaded ||
-      rideCoordinate ||
-      !currentCoordinate
-    ) {
+    if (!isStyleLoaded || rideCoordinate || !currentCoordinate) {
       return;
     }
 

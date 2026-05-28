@@ -159,9 +159,16 @@ export default function HistoryScreen() {
       {rides.map((ride) => (
         <View key={ride.id} style={styles.card}>
           <View style={styles.cardHeader}>
-            <Text style={styles.date}>
-              {new Date(ride.startedAt).toLocaleString()}
-            </Text>
+            <View style={styles.cardTitleBlock}>
+              <Text style={styles.date}>
+                {ride.title ?? new Date(ride.startedAt).toLocaleString()}
+              </Text>
+              {ride.title ? (
+                <Text style={styles.savedAt}>
+                  {new Date(ride.startedAt).toLocaleString()}
+                </Text>
+              ) : null}
+            </View>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Delete ride"
@@ -221,6 +228,13 @@ export default function HistoryScreen() {
               label="Calories"
               value={formatCalories(ride.activeCaloriesKcal)}
             />
+            {ride.feelingRating == null ? null : (
+              <SummaryMetric
+                styles={styles}
+                label="Feeling"
+                value={`${ride.feelingRating}/10`}
+              />
+            )}
           </View>
           <View style={styles.splits}>
             <Text style={styles.splitsTitle}>Splits</Text>
@@ -323,11 +337,20 @@ function createStyles(colors: ThemeColors) {
       justifyContent: 'space-between',
       gap: 12,
     },
-    date: {
+    cardTitleBlock: {
       flex: 1,
+      minWidth: 0,
+      gap: 3,
+    },
+    date: {
       color: colors.primaryText,
       fontSize: 18,
       fontWeight: '800',
+    },
+    savedAt: {
+      color: colors.mutedText,
+      fontSize: 12,
+      fontWeight: '700',
     },
     deleteButton: {
       borderRadius: 999,

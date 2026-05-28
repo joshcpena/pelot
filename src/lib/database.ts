@@ -15,6 +15,7 @@ export async function initializeDatabase() {
 
     CREATE TABLE IF NOT EXISTS rides (
       id TEXT PRIMARY KEY NOT NULL,
+      title TEXT,
       started_at INTEGER NOT NULL,
       ended_at INTEGER,
       elapsed_seconds INTEGER NOT NULL DEFAULT 0,
@@ -22,6 +23,7 @@ export async function initializeDatabase() {
       distance_meters REAL NOT NULL DEFAULT 0,
       ascent_meters REAL NOT NULL DEFAULT 0,
       active_calories_kcal REAL,
+      feeling_rating INTEGER,
       average_speed_mps REAL NOT NULL DEFAULT 0,
       max_speed_mps REAL NOT NULL DEFAULT 0,
       unit_preference TEXT NOT NULL DEFAULT 'imperial'
@@ -68,9 +70,17 @@ export async function initializeDatabase() {
   );
   const rideColumnNames = new Set(rideColumns.map((column) => column.name));
 
+  if (!rideColumnNames.has('title')) {
+    await db.execAsync('ALTER TABLE rides ADD COLUMN title TEXT');
+  }
+
   if (!rideColumnNames.has('active_calories_kcal')) {
     await db.execAsync(
       'ALTER TABLE rides ADD COLUMN active_calories_kcal REAL',
     );
+  }
+
+  if (!rideColumnNames.has('feeling_rating')) {
+    await db.execAsync('ALTER TABLE rides ADD COLUMN feeling_rating INTEGER');
   }
 }

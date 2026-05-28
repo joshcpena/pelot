@@ -22,6 +22,7 @@ import {
   calculateMetricsFromPoints,
   loadRidePoints,
   setActiveRideId,
+  type FinishedRideSummary,
 } from './rideStorage';
 import type {
   RideMetrics,
@@ -791,9 +792,9 @@ export function useForegroundRideRecorder(settings: RideSettings) {
     }
   }
 
-  async function stopRide() {
+  async function stopRide(): Promise<FinishedRideSummary | null> {
     if (statusRef.current === 'idle' || statusRef.current === 'stopped') {
-      return;
+      return null;
     }
 
     accumulateElapsedTime();
@@ -816,13 +817,24 @@ export function useForegroundRideRecorder(settings: RideSettings) {
     );
     updateMetrics(finalMetrics);
 
+    let finishedRide: FinishedRideSummary | null = null;
+
     if (rideIdRef.current) {
-      const savedMetrics = await finishRide(
+      finishedRide = await finishRide(
         rideIdRef.current,
         finalMetrics,
         settings,
       );
-      updateMetrics(savedMetrics);
+      updateMetrics({
+        ...finalMetrics,
+        elapsedSeconds: finishedRide.summary.elapsedSeconds,
+        movingSeconds: finishedRide.summary.movingSeconds,
+        distanceMeters: finishedRide.summary.distanceMeters,
+        ascentMeters: finishedRide.summary.ascentMeters,
+        activeCaloriesKcal: finishedRide.summary.activeCaloriesKcal,
+        averageSpeedMps: finishedRide.summary.averageSpeedMps,
+        maxSpeedMps: finishedRide.summary.maxSpeedMps,
+      });
       await setActiveRideId(null);
     }
 
@@ -831,6 +843,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
     setRideStatus('stopped');
     rideIdRef.current = null;
     setCurrentCoordinate(null);
+    return finishedRide;
   }
 
   useEffect(() => {

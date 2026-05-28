@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import * as Brightness from 'expo-brightness';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
+  Alert,
   Animated,
   Easing,
   Keyboard,
@@ -49,6 +50,15 @@ import {
   saveRecentRouteDestinations,
   searchBikeDestinations,
 } from '../src/features/ride/routePlanning';
+import {
+  deleteRide,
+  updateRideDetails,
+  type FinishedRideSummary,
+} from '../src/features/ride/rideStorage';
+import {
+  FinishedRideSummarySheet,
+  type HeartRateSample,
+} from '../src/features/ride/FinishedRideSummarySheet';
 import type {
   DashboardCard,
   DashboardCardSpan,
@@ -320,6 +330,8 @@ export default function HomeScreen() {
   const brightnessBeforeDimRef = useRef<number | null>(null);
   const stopHoldCompletedRef = useRef(false);
   const destinationInputRef = useRef<TextInput | null>(null);
+  const heartRateSamplesRef = useRef<HeartRateSample[]>([]);
+  const lastHeartRateSampleRef = useRef<HeartRateSample | null>(null);
   const [isRoutePlannerOpen, setIsRoutePlannerOpen] = useState(false);
   const [isNavigationOpen, setIsNavigationOpen] = useState(false);
   const [destinationInput, setDestinationInput] = useState('');
@@ -340,6 +352,12 @@ export default function HomeScreen() {
   const [routePlannerKeyboardHeight, setRoutePlannerKeyboardHeight] =
     useState(0);
   const [routePlanError, setRoutePlanError] = useState<string | null>(null);
+  const [finishedRide, setFinishedRide] = useState<FinishedRideSummary | null>(
+    null,
+  );
+  const [finishedRideHeartRateSamples, setFinishedRideHeartRateSamples] =
+    useState<HeartRateSample[]>([]);
+  const [isSavingFinishedRide, setIsSavingFinishedRide] = useState(false);
   const [navigationPanelProgress] = useState(() => new Animated.Value(0));
   const [now, setNow] = useState<number | null>(null);
   const [stopFill] = useState(() => new Animated.Value(0));
@@ -399,9 +417,15 @@ export default function HomeScreen() {
   const dashboardRuntimeLayout = dashboardSwipeTargetScreen
     ? [...displayedLayout, ...dashboardSwipeTargetScreen.layout]
     : displayedLayout;
-  const shouldConnectHeartRate = dashboardRuntimeLayout.some((card) =>
-    heartRateMetricIds.has(card.metricId),
-  );
+  const hasConfiguredHeartRateDevice =
+    settings.connectedHeartRateDevice != null;
+  const shouldConnectHeartRate =
+    hasConfiguredHeartRateDevice &&
+    (dashboardRuntimeLayout.some((card) =>
+      heartRateMetricIds.has(card.metricId),
+    ) ||
+      isRecording ||
+      isPaused);
   const shouldReadDeviceBattery = dashboardRuntimeLayout.some(
     (card) => card.metricId === 'deviceBatteryLevel',
   );
@@ -595,6 +619,100 @@ export default function HomeScreen() {
     }
 
     scheduleAutoDim();
+  }
+
+  function resetRideSummaryDraft() {
+    heartRateSamplesRef.current = [];
+    lastHeartRateSampleRef.current = null;
+    setFinishedRide(null);
+    setFinishedRideHeartRateSamples([]);
+  }
+
+  const recordHeartRateSample = useCallback((bpm: number) => {
+    const recordedAt = Date.now();
+    const lastSample = lastHeartRateSampleRef.current;
+
+    if (
+      lastSample &&
+      lastSample.bpm === bpm &&
+      recordedAt - lastSample.recordedAt < 4500
+    ) {
+      return;
+    }
+
+    const sample = { recordedAt, bpm };
+    heartRateSamplesRef.current = [...heartRateSamplesRef.current, sample];
+    lastHeartRateSampleRef.current = sample;
+  }, []);
+
+  useEffect(() => {
+    if (!isRecording || heartRate.heartRateBpm == null) {
+      return;
+    }
+
+    recordHeartRateSample(heartRate.heartRateBpm);
+
+    const interval = setInterval(() => {
+      if (heartRate.heartRateBpm != null) {
+        recordHeartRateSample(heartRate.heartRateBpm);
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [heartRate.heartRateBpm, isRecording, recordHeartRateSample]);
+
+  function startRide() {
+    resetRideSummaryDraft();
+    recorder.startRide().catch(() => {
+      Alert.alert('Could not start ride', 'Please try again.');
+    });
+  }
+
+  async function finishRideSummary(details: {
+    title: string | null;
+    feelingRating: number | null;
+  }) {
+    if (!finishedRide) {
+      return;
+    }
+
+    setIsSavingFinishedRide(true);
+
+    try {
+      await updateRideDetails(finishedRide.summary.id, details);
+      setFinishedRide(null);
+      setFinishedRideHeartRateSamples([]);
+    } catch {
+      Alert.alert('Could not save ride', 'Please try again.');
+    } finally {
+      setIsSavingFinishedRide(false);
+    }
+  }
+
+  function discardFinishedRide() {
+    if (!finishedRide) {
+      return;
+    }
+
+    Alert.alert('Discard ride?', 'This deletes the ride from your history.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Discard',
+        style: 'destructive',
+        onPress: () => {
+          setIsSavingFinishedRide(true);
+          deleteRide(finishedRide.summary.id)
+            .then(() => {
+              setFinishedRide(null);
+              setFinishedRideHeartRateSamples([]);
+            })
+            .catch(() => {
+              Alert.alert('Could not discard ride', 'Please try again.');
+            })
+            .finally(() => setIsSavingFinishedRide(false));
+        },
+      },
+    ]);
   }
 
   useEffect(() => {
@@ -1195,7 +1313,19 @@ export default function HomeScreen() {
     stopHoldCompletedRef.current = true;
     stopFill.stopAnimation();
     stopFill.setValue(0);
-    recorder.stopRide();
+    recorder
+      .stopRide()
+      .then((ride) => {
+        if (!ride) {
+          return;
+        }
+
+        setFinishedRide(ride);
+        setFinishedRideHeartRateSamples(heartRateSamplesRef.current);
+      })
+      .catch(() => {
+        Alert.alert('Could not stop ride', 'Please try again.');
+      });
   }
 
   function cancelStopHold() {
@@ -1876,7 +2006,7 @@ export default function HomeScreen() {
                   styles.primaryButton,
                   pressed && styles.primaryButtonPressed,
                 ]}
-                onPress={recorder.startRide}
+                onPress={startRide}
               >
                 <Text style={styles.primaryButtonText}>Start ride</Text>
               </Pressable>
@@ -1994,6 +2124,20 @@ export default function HomeScreen() {
           )
         }
         onSelect={chooseDashboardSpan}
+      />
+      <FinishedRideSummarySheet
+        visible={finishedRide != null}
+        ride={finishedRide}
+        heartRateSamples={finishedRideHeartRateSamples}
+        showHeartRate={
+          hasConfiguredHeartRateDevice ||
+          finishedRideHeartRateSamples.length > 0
+        }
+        isSaving={isSavingFinishedRide}
+        onDiscard={discardFinishedRide}
+        onFinish={(details) => {
+          finishRideSummary(details).catch(() => undefined);
+        }}
       />
       <Modal
         animationType="slide"
