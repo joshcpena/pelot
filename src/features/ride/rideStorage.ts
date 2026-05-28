@@ -297,7 +297,7 @@ export async function updateRideDetails(
   const feelingRating =
     details.feelingRating == null
       ? null
-      : Math.min(10, Math.max(1, Math.round(details.feelingRating)));
+      : Math.min(10, Math.max(0, Math.round(details.feelingRating)));
 
   if (title !== undefined && details.feelingRating !== undefined) {
     await db.runAsync(

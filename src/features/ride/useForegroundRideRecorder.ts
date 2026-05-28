@@ -1129,7 +1129,10 @@ export function useForegroundRideRecorder(settings: RideSettings) {
       setRideStatus('recording');
       startTimer();
       await startWatchingBarometer();
-      await startWatchingLocation();
+
+      if (watchRef.current == null) {
+        await startWatchingLocation();
+      }
 
       await syncKeepAwake();
     } finally {

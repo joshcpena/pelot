@@ -113,8 +113,8 @@ function FinishedRideSummarySheetContent({
   const styles = createStyles(colors);
   const [titleInput, setTitleInput] = useState(ride.summary.title ?? '');
   const [isRenaming, setIsRenaming] = useState(false);
-  const [feelingRating, setFeelingRating] = useState(
-    ride.summary.feelingRating,
+  const [feelingRating, setFeelingRating] = useState<number | null>(
+    ride.summary.feelingRating ?? 5,
   );
 
   const title =
@@ -273,7 +273,7 @@ function FinishedRideSummarySheetContent({
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>Feeling</Text>
                 <Text style={styles.sectionDetail}>
-                  {feelingRating == null ? 'Optional' : `${feelingRating}/10`}
+                  {feelingRating == null ? 'Not saved' : `${feelingRating}/10`}
                 </Text>
               </View>
               <FeelingSlider
@@ -479,7 +479,7 @@ function FeelingSlider({
   const styles = createStyles(colors);
   const trackRef = useRef<View | null>(null);
   const [track, setTrack] = useState({ pageX: 0, width: 0 });
-  const percentage = value == null ? 0 : ((value - 1) / 9) * 100;
+  const percentage = value == null ? 0 : (value / 10) * 100;
 
   function measureTrack() {
     trackRef.current?.measureInWindow((pageX, _pageY, width) => {
@@ -496,7 +496,7 @@ function FeelingSlider({
       1,
       Math.max(0, (pageX - track.pageX) / track.width),
     );
-    onChange(Math.min(10, Math.max(1, Math.round(progress * 9) + 1)));
+    onChange(Math.min(10, Math.max(0, Math.round(progress * 10))));
   }
 
   return (
