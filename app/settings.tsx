@@ -512,7 +512,7 @@ export default function SettingsScreen() {
           <View style={styles.switchCopy}>
             <Text style={styles.label}>Keep screen awake</Text>
             <Text style={styles.muted}>
-              Prevent sleep while actively recording.
+              Prevent sleep only while viewing an active or paused ride.
             </Text>
           </View>
           <Switch
@@ -524,7 +524,7 @@ export default function SettingsScreen() {
           <View style={styles.switchCopy}>
             <Text style={styles.label}>Auto-dim screen</Text>
             <Text style={styles.muted}>
-              Dim after idle time while recording; tap anywhere to brighten.
+              Dim only while viewing an active or paused ride.
             </Text>
           </View>
           <Switch

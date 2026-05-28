@@ -6,6 +6,8 @@ import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Animated,
+  AppState,
+  type AppStateStatus,
   Easing,
   Keyboard,
   Modal,
@@ -318,6 +320,7 @@ export default function HomeScreen() {
   const lastRerouteAtRef = useRef(0);
   const autoDimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const brightnessBeforeDimRef = useRef<number | null>(null);
+  const shouldAutoDimRideScreenRef = useRef(false);
   const stopHoldCompletedRef = useRef(false);
   const destinationInputRef = useRef<TextInput | null>(null);
   const [isRoutePlannerOpen, setIsRoutePlannerOpen] = useState(false);
@@ -342,6 +345,9 @@ export default function HomeScreen() {
   const [routePlanError, setRoutePlanError] = useState<string | null>(null);
   const [navigationPanelProgress] = useState(() => new Animated.Value(0));
   const [now, setNow] = useState<number | null>(null);
+  const [appState, setAppState] = useState<AppStateStatus>(
+    AppState.currentState,
+  );
   const [stopFill] = useState(() => new Animated.Value(0));
   const [isEditingDashboard, setIsEditingDashboard] = useState(false);
   const [dashboardScreenDrafts, setDashboardScreenDrafts] = useState<
@@ -373,6 +379,10 @@ export default function HomeScreen() {
   const visibleDashboardScreenIndexRef = useRef(0);
   const isRecording = recorder.status === 'recording';
   const isPaused = recorder.status === 'paused';
+  const shouldApplyRideScreenControls =
+    appState === 'active' && (isRecording || isPaused);
+  const shouldAutoDimRideScreen =
+    settings.autoDimScreen && shouldApplyRideScreenControls;
   const canStart = recorder.status === 'idle' || recorder.status === 'stopped';
   const dashboardRowHeight = dashboardHeight > 0 ? dashboardHeight / 10 : 66;
   const displayedDashboardScreens = isEditingDashboard
@@ -481,6 +491,7 @@ export default function HomeScreen() {
       : [];
   const hasRoutePlannerOptionList =
     visibleRecentRouteDestinations.length > 0 || destinationOptions.length > 0;
+  shouldAutoDimRideScreenRef.current = shouldAutoDimRideScreen;
   const [dashboardSwipeResponder] = useState(() =>
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, gesture) =>
@@ -542,6 +553,12 @@ export default function HomeScreen() {
   }, [shouldRunClock]);
 
   useEffect(() => {
+    const subscription = AppState.addEventListener('change', setAppState);
+
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
     if (!isPaused) {
       stopFill.stopAnimation();
       stopFill.setValue(0);
@@ -556,18 +573,38 @@ export default function HomeScreen() {
   }
 
   async function dimScreenForRide() {
-    if (brightnessBeforeDimRef.current == null) {
-      brightnessBeforeDimRef.current = await Brightness.getBrightnessAsync();
+    if (!shouldAutoDimRideScreenRef.current) {
+      return;
+    }
+
+    let brightnessBeforeDim = brightnessBeforeDimRef.current;
+
+    if (brightnessBeforeDim == null) {
+      brightnessBeforeDim = await Brightness.getBrightnessAsync();
+
+      if (!shouldAutoDimRideScreenRef.current) {
+        return;
+      }
+
+      brightnessBeforeDimRef.current = brightnessBeforeDim;
     }
 
     await Brightness.setBrightnessAsync(AUTO_DIM_BRIGHTNESS);
+
+    if (!shouldAutoDimRideScreenRef.current) {
+      await Brightness.setBrightnessAsync(brightnessBeforeDim);
+      brightnessBeforeDimRef.current = null;
+      setIsScreenDimmed(false);
+      return;
+    }
+
     setIsScreenDimmed(true);
   }
 
   function scheduleAutoDim() {
     clearAutoDimTimer();
 
-    if (!settings.autoDimScreen || recorder.status !== 'recording') {
+    if (!shouldAutoDimRideScreenRef.current) {
       return;
     }
 
@@ -600,7 +637,7 @@ export default function HomeScreen() {
   useEffect(() => {
     clearAutoDimTimer();
 
-    if (!settings.autoDimScreen || recorder.status !== 'recording') {
+    if (!shouldAutoDimRideScreen) {
       const brightnessBeforeDim = brightnessBeforeDimRef.current;
 
       if (brightnessBeforeDim != null) {
@@ -610,23 +647,19 @@ export default function HomeScreen() {
             setIsScreenDimmed(false);
           })
           .catch(() => undefined);
+      } else {
+        setIsScreenDimmed(false);
       }
 
       return () => clearAutoDimTimer();
     }
 
     autoDimTimerRef.current = setTimeout(() => {
-      Brightness.getBrightnessAsync()
-        .then((brightness) => {
-          brightnessBeforeDimRef.current = brightness;
-          return Brightness.setBrightnessAsync(AUTO_DIM_BRIGHTNESS);
-        })
-        .then(() => setIsScreenDimmed(true))
-        .catch(() => undefined);
+      dimScreenForRide().catch(() => undefined);
     }, AUTO_DIM_DELAY_MS);
 
     return () => clearAutoDimTimer();
-  }, [recorder.status, settings.autoDimScreen]);
+  }, [shouldAutoDimRideScreen]);
 
   useEffect(() => {
     return () => {

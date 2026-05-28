@@ -96,6 +96,11 @@ export type RideSplit = {
   ascentMeters: number;
 };
 
+export type RidePauseInterval = {
+  startedAt: number;
+  endedAt: number;
+};
+
 type RideSummaryRow = {
   id: string;
   started_at: number;
@@ -271,7 +276,21 @@ export async function deleteRide(rideId: string) {
   await db.runAsync('DELETE FROM rides WHERE id = ?', rideId);
 }
 
-export function calculateMetricsFromPoints(points: RidePoint[]): RideMetrics {
+function doesSegmentOverlapPause(
+  segmentStartedAt: number,
+  segmentEndedAt: number,
+  pauseIntervals: RidePauseInterval[],
+) {
+  return pauseIntervals.some(
+    (pause) =>
+      segmentStartedAt < pause.endedAt && segmentEndedAt > pause.startedAt,
+  );
+}
+
+export function calculateMetricsFromPoints(
+  points: RidePoint[],
+  pauseIntervals: RidePauseInterval[] = [],
+): RideMetrics {
   let distanceMeters = 0;
   let ascentMeters = 0;
   let movingSeconds = 0;
@@ -284,6 +303,17 @@ export function calculateMetricsFromPoints(points: RidePoint[]): RideMetrics {
       0,
       Math.round((next.recordedAt - previous.recordedAt) / 1000),
     );
+
+    if (
+      doesSegmentOverlapPause(
+        previous.recordedAt,
+        next.recordedAt,
+        pauseIntervals,
+      )
+    ) {
+      continue;
+    }
+
     const distance = distanceBetweenMeters(previous, next);
     const speed = next.speedMps ?? (seconds > 0 ? distance / seconds : 0);
 
@@ -328,7 +358,11 @@ export function calculateMetricsFromPoints(points: RidePoint[]): RideMetrics {
   };
 }
 
-function buildSplits(points: RidePoint[], settings: RideSettings): RideSplit[] {
+function buildSplits(
+  points: RidePoint[],
+  settings: RideSettings,
+  pauseIntervals: RidePauseInterval[] = [],
+): RideSplit[] {
   const target =
     settings.splitType === 'distance'
       ? settings.splitDistanceMeters
@@ -345,6 +379,17 @@ function buildSplits(points: RidePoint[], settings: RideSettings): RideSplit[] {
       0,
       Math.round((next.recordedAt - previous.recordedAt) / 1000),
     );
+
+    if (
+      doesSegmentOverlapPause(
+        previous.recordedAt,
+        next.recordedAt,
+        pauseIntervals,
+      )
+    ) {
+      continue;
+    }
+
     const distanceMeters = distanceBetweenMeters(previous, next);
     const ascentMeters = positiveElevationGainMeters(previous, next);
 
@@ -422,13 +467,40 @@ export async function finishRide(
   rideId: string,
   fallbackMetrics: RideMetrics,
   settings: RideSettings,
+  pauseIntervals: RidePauseInterval[] = [],
 ) {
   const points = await loadRidePoints(rideId);
+  const pointMetrics =
+    points.length > 1
+      ? calculateMetricsFromPoints(points, pauseIntervals)
+      : null;
+  const distanceMeters =
+    pointMetrics?.distanceMeters ?? fallbackMetrics.distanceMeters;
+  const movingSeconds = Math.max(
+    0,
+    Math.min(fallbackMetrics.movingSeconds, fallbackMetrics.elapsedSeconds),
+  );
   const metrics = withEstimatedCalories(
-    points.length > 1 ? calculateMetricsFromPoints(points) : fallbackMetrics,
+    pointMetrics
+      ? {
+          ...fallbackMetrics,
+          startedAt: pointMetrics.startedAt ?? fallbackMetrics.startedAt,
+          distanceMeters,
+          ascentMeters: pointMetrics.ascentMeters,
+          currentSpeedMps: pointMetrics.currentSpeedMps,
+          averageSpeedMps:
+            movingSeconds > 0 ? distanceMeters / movingSeconds : 0,
+          maxSpeedMps: Math.max(
+            fallbackMetrics.maxSpeedMps,
+            pointMetrics.maxSpeedMps,
+          ),
+          movingSeconds,
+        }
+      : fallbackMetrics,
     settings,
   );
-  const splits = points.length > 1 ? buildSplits(points, settings) : [];
+  const splits =
+    points.length > 1 ? buildSplits(points, settings, pauseIntervals) : [];
   const db = await getDatabase();
 
   await db.runAsync(
