@@ -12,17 +12,56 @@ export type WeatherSample = {
 
 type OpenMeteoCurrentWeather = {
   current?: {
-    time?: string;
+    time?: number | string;
     temperature_2m?: number;
     wind_speed_10m?: number;
   };
 };
+
+function parseWeatherTimestamp(
+  timestamp: number | string | undefined,
+  now: number,
+) {
+  if (typeof timestamp === 'number' && Number.isFinite(timestamp)) {
+    return timestamp * 1000;
+  }
+
+  if (typeof timestamp !== 'string') {
+    return now;
+  }
+
+  const includesTimezone = /(?:Z|[+-]\d\d:?\d\d)$/.test(timestamp);
+  const parsedTimestamp = Date.parse(
+    includesTimezone ? timestamp : `${timestamp}Z`,
+  );
+
+  return Number.isFinite(parsedTimestamp) ? parsedTimestamp : now;
+}
+
+export function parseCurrentWeather(
+  data: OpenMeteoCurrentWeather,
+  now = Date.now(),
+): WeatherSample {
+  return {
+    recordedAt: parseWeatherTimestamp(data.current?.time, now),
+    temperatureC:
+      typeof data.current?.temperature_2m === 'number'
+        ? data.current.temperature_2m
+        : null,
+    windSpeedKph:
+      typeof data.current?.wind_speed_10m === 'number'
+        ? data.current.wind_speed_10m
+        : null,
+  };
+}
 
 async function fetchCurrentWeather(point: RidePoint): Promise<WeatherSample> {
   const params = new URLSearchParams({
     latitude: String(point.latitude),
     longitude: String(point.longitude),
     current: 'temperature_2m,wind_speed_10m',
+    timezone: 'GMT',
+    timeformat: 'unixtime',
   });
   const response = await fetch(
     `https://api.open-meteo.com/v1/forecast?${params}`,
@@ -34,19 +73,7 @@ async function fetchCurrentWeather(point: RidePoint): Promise<WeatherSample> {
 
   const data = (await response.json()) as OpenMeteoCurrentWeather;
 
-  return {
-    recordedAt: data.current?.time
-      ? new Date(data.current.time).getTime()
-      : Date.now(),
-    temperatureC:
-      typeof data.current?.temperature_2m === 'number'
-        ? data.current.temperature_2m
-        : null,
-    windSpeedKph:
-      typeof data.current?.wind_speed_10m === 'number'
-        ? data.current.wind_speed_10m
-        : null,
-  };
+  return parseCurrentWeather(data);
 }
 
 export function useRideWeatherSamples(

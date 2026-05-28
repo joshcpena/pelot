@@ -75,9 +75,9 @@ export function formatPace(mps: number, unitSystem: 'imperial' | 'metric') {
   }
 
   const metersPerUnit = unitSystem === 'metric' ? 1000 : 1609.344;
-  const secondsPerUnit = metersPerUnit / mps;
-  const minutes = Math.floor(secondsPerUnit / 60);
-  const seconds = Math.round(secondsPerUnit % 60);
+  const roundedSecondsPerUnit = Math.round(metersPerUnit / mps);
+  const minutes = Math.floor(roundedSecondsPerUnit / 60);
+  const seconds = roundedSecondsPerUnit % 60;
   const unit = unitSystem === 'metric' ? 'km' : 'mi';
 
   return `${minutes}:${seconds.toString().padStart(2, '0')} /${unit}`;

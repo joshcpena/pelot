@@ -9,3 +9,7 @@ export async function stopBackgroundRideRecording() {}
 export async function isBackgroundRideRecordingAvailable() {
   return false;
 }
+
+export async function isBackgroundRideRecordingStarted() {
+  return false;
+}

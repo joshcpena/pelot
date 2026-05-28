@@ -1,8 +1,10 @@
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
+import { AppState } from 'react-native';
 
 import { initializeDatabase } from '../../lib/database';
 import { getActiveRideId, insertRidePoints } from './rideStorage';
+import { shouldPersistBackgroundRidePoint } from './rideLocationOwnership';
 import type { RideSettings } from './types';
 
 export const BACKGROUND_RIDE_LOCATION_TASK = 'pelot-background-ride-location';
@@ -34,7 +36,7 @@ TaskManager.defineTask<{
   await initializeDatabase();
   const rideId = await getActiveRideId();
 
-  if (!rideId) {
+  if (!rideId || !shouldPersistBackgroundRidePoint(AppState.currentState)) {
     return;
   }
 
@@ -48,6 +50,10 @@ TaskManager.defineTask<{
 export async function isBackgroundRideRecordingAvailable() {
   const backgroundPermission = await Location.getBackgroundPermissionsAsync();
   return backgroundPermission.status === Location.PermissionStatus.GRANTED;
+}
+
+export async function isBackgroundRideRecordingStarted() {
+  return Location.hasStartedLocationUpdatesAsync(BACKGROUND_RIDE_LOCATION_TASK);
 }
 
 export async function startBackgroundRideRecording(settings: RideSettings) {

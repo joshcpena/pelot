@@ -1,16 +1,15 @@
 import { getDatabase, initializeDatabase } from '../../lib/database';
+import { withEstimatedCalories } from './metrics';
 import {
-  distanceBetweenMeters,
-  positiveElevationGainMeters,
-  withEstimatedCalories,
-} from './metrics';
-import type {
-  RideMetrics,
-  RidePoint,
-  RideSettings,
-  SplitType,
-  UnitSystem,
-} from './types';
+  buildRideSplits,
+  calculateMetricsFromPoints,
+  type RidePauseInterval,
+  type RideSplit,
+} from './rideCalculations';
+import type { RideMetrics, RidePoint, RideSettings, UnitSystem } from './types';
+
+export { calculateMetricsFromPoints } from './rideCalculations';
+export type { RidePauseInterval, RideSplit } from './rideCalculations';
 
 type RidePointRow = {
   recorded_at: number;
@@ -95,20 +94,6 @@ export type FinishedRideSummary = {
   splits: RideSplit[];
 };
 
-export type RideSplit = {
-  splitType: SplitType;
-  splitIndex: number;
-  distanceMeters: number;
-  durationSeconds: number;
-  averageSpeedMps: number;
-  ascentMeters: number;
-};
-
-export type RidePauseInterval = {
-  startedAt: number;
-  endedAt: number;
-};
-
 type RideSummaryRow = {
   id: string;
   title: string | null;
@@ -126,7 +111,7 @@ type RideSummaryRow = {
 };
 
 type RideSplitRow = {
-  split_type: SplitType;
+  split_type: RideSplit['splitType'];
   split_index: number;
   distance_meters: number;
   duration_seconds: number;
@@ -323,190 +308,38 @@ export async function updateRideDetails(
   }
 }
 
-function doesSegmentOverlapPause(
-  segmentStartedAt: number,
-  segmentEndedAt: number,
-  pauseIntervals: RidePauseInterval[],
-) {
-  return pauseIntervals.some(
-    (pause) =>
-      segmentStartedAt < pause.endedAt && segmentEndedAt > pause.startedAt,
-  );
-}
-
-export function calculateMetricsFromPoints(
-  points: RidePoint[],
-  pauseIntervals: RidePauseInterval[] = [],
-): RideMetrics {
-  let distanceMeters = 0;
-  let ascentMeters = 0;
-  let movingSeconds = 0;
-  let maxSpeedMps = 0;
-
-  for (let index = 1; index < points.length; index += 1) {
-    const previous = points[index - 1];
-    const next = points[index];
-    const seconds = Math.max(
-      0,
-      Math.round((next.recordedAt - previous.recordedAt) / 1000),
-    );
-
-    if (
-      doesSegmentOverlapPause(
-        previous.recordedAt,
-        next.recordedAt,
-        pauseIntervals,
-      )
-    ) {
-      continue;
-    }
-
-    const distance = distanceBetweenMeters(previous, next);
-    const speed = next.speedMps ?? (seconds > 0 ? distance / seconds : 0);
-
-    distanceMeters += distance;
-    ascentMeters += positiveElevationGainMeters(previous, next);
-    movingSeconds += seconds;
-    maxSpeedMps = Math.max(maxSpeedMps, speed);
-  }
-
-  const elapsedSeconds =
-    points.length > 1
-      ? Math.max(
-          0,
-          Math.round(
-            (points[points.length - 1].recordedAt - points[0].recordedAt) /
-              1000,
-          ),
-        )
-      : 0;
-
-  return {
-    startedAt: points[0]?.recordedAt ?? null,
-    elapsedSeconds,
-    movingSeconds,
-    pausedSeconds: 0,
-    distanceMeters,
-    ascentMeters,
-    activeCaloriesKcal: null,
-    currentSpeedMps: points[points.length - 1]?.speedMps ?? 0,
-    averageSpeedMps: movingSeconds > 0 ? distanceMeters / movingSeconds : 0,
-    maxSpeedMps,
-    lapNumber: 1,
-    lapStartedAt: points[0]?.recordedAt ?? null,
-    lapElapsedSeconds: elapsedSeconds,
-    lapPausedSeconds: 0,
-    lapMovingSeconds: movingSeconds,
-    lapDistanceMeters: distanceMeters,
-    lapAscentMeters: ascentMeters,
-    lapActiveCaloriesKcal: null,
-    lapAverageSpeedMps: movingSeconds > 0 ? distanceMeters / movingSeconds : 0,
-    lapMaxSpeedMps: maxSpeedMps,
-  };
-}
-
-function buildSplits(
-  points: RidePoint[],
-  settings: RideSettings,
-  pauseIntervals: RidePauseInterval[] = [],
-): RideSplit[] {
-  const target =
-    settings.splitType === 'distance'
-      ? settings.splitDistanceMeters
-      : settings.splitDurationSeconds;
-  const splits: RideSplit[] = [];
-  let splitDistanceMeters = 0;
-  let splitDurationSeconds = 0;
-  let splitAscentMeters = 0;
-
-  for (let index = 1; index < points.length; index += 1) {
-    const previous = points[index - 1];
-    const next = points[index];
-    const durationSeconds = Math.max(
-      0,
-      Math.round((next.recordedAt - previous.recordedAt) / 1000),
-    );
-
-    if (
-      doesSegmentOverlapPause(
-        previous.recordedAt,
-        next.recordedAt,
-        pauseIntervals,
-      )
-    ) {
-      continue;
-    }
-
-    const distanceMeters = distanceBetweenMeters(previous, next);
-    const ascentMeters = positiveElevationGainMeters(previous, next);
-
-    splitDistanceMeters += distanceMeters;
-    splitDurationSeconds += durationSeconds;
-    splitAscentMeters += ascentMeters;
-
-    const progress =
-      settings.splitType === 'distance'
-        ? splitDistanceMeters
-        : splitDurationSeconds;
-
-    if (progress >= target) {
-      splits.push({
-        splitType: settings.splitType,
-        splitIndex: splits.length + 1,
-        distanceMeters: splitDistanceMeters,
-        durationSeconds: splitDurationSeconds,
-        averageSpeedMps:
-          splitDurationSeconds > 0
-            ? splitDistanceMeters / splitDurationSeconds
-            : 0,
-        ascentMeters: splitAscentMeters,
-      });
-      splitDistanceMeters = 0;
-      splitDurationSeconds = 0;
-      splitAscentMeters = 0;
-    }
-  }
-
-  if (splitDistanceMeters > 0 || splitDurationSeconds > 0) {
-    splits.push({
-      splitType: settings.splitType,
-      splitIndex: splits.length + 1,
-      distanceMeters: splitDistanceMeters,
-      durationSeconds: splitDurationSeconds,
-      averageSpeedMps:
-        splitDurationSeconds > 0
-          ? splitDistanceMeters / splitDurationSeconds
-          : 0,
-      ascentMeters: splitAscentMeters,
-    });
-  }
-
-  return splits;
-}
-
 async function replaceRideSplits(rideId: string, splits: RideSplit[]) {
   const db = await getDatabase();
-  await db.runAsync('DELETE FROM ride_splits WHERE ride_id = ?', rideId);
+  await db.execAsync('BEGIN TRANSACTION');
 
-  for (const split of splits) {
-    await db.runAsync(
-      `INSERT INTO ride_splits (
-        ride_id,
-        split_type,
-        split_index,
-        distance_meters,
-        duration_seconds,
-        average_speed_mps,
-        ascent_meters
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      rideId,
-      split.splitType,
-      split.splitIndex,
-      split.distanceMeters,
-      split.durationSeconds,
-      split.averageSpeedMps,
-      split.ascentMeters,
-    );
+  try {
+    await db.runAsync('DELETE FROM ride_splits WHERE ride_id = ?', rideId);
+
+    for (const split of splits) {
+      await db.runAsync(
+        `INSERT INTO ride_splits (
+          ride_id,
+          split_type,
+          split_index,
+          distance_meters,
+          duration_seconds,
+          average_speed_mps,
+          ascent_meters
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        rideId,
+        split.splitType,
+        split.splitIndex,
+        split.distanceMeters,
+        split.durationSeconds,
+        split.averageSpeedMps,
+        split.ascentMeters,
+      );
+    }
+
+    await db.execAsync('COMMIT');
+  } catch (error) {
+    await db.execAsync('ROLLBACK');
+    throw error;
   }
 }
 
@@ -547,7 +380,7 @@ export async function finishRide(
     settings,
   );
   const splits =
-    points.length > 1 ? buildSplits(points, settings, pauseIntervals) : [];
+    points.length > 1 ? buildRideSplits(points, settings, pauseIntervals) : [];
   const db = await getDatabase();
   const endedAt = Date.now();
 

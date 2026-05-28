@@ -6,6 +6,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 
 import { initializeDatabase } from '../../lib/database';
 import {
+  isBackgroundRideRecordingStarted,
   startBackgroundRideRecording,
   stopBackgroundRideRecording,
 } from './backgroundLocation';
@@ -25,6 +26,7 @@ import {
   type FinishedRideSummary,
   type RidePauseInterval,
 } from './rideStorage';
+import { areRidePointListsEqual, mergeRidePoints } from './ridePoints';
 import type {
   RideMetrics,
   RidePoint,
@@ -106,58 +108,6 @@ function toRouteCoordinateFromPoint(point: RidePoint): RouteCoordinate {
     latitude: point.latitude,
     longitude: point.longitude,
   };
-}
-
-function getRidePointKey(point: RidePoint) {
-  return [point.recordedAt, point.latitude, point.longitude].join(':');
-}
-
-function compareRidePoints(first: RidePoint, second: RidePoint) {
-  return first.recordedAt - second.recordedAt;
-}
-
-function mergeRidePoints(...pointLists: RidePoint[][]) {
-  const pointsByKey = new Map<string, RidePoint>();
-
-  for (const points of pointLists) {
-    for (const point of points) {
-      pointsByKey.set(getRidePointKey(point), point);
-    }
-  }
-
-  return [...pointsByKey.values()].sort(compareRidePoints);
-}
-
-function areOptionalNumbersEqual(first: number | null, second: number | null) {
-  return Object.is(first, second);
-}
-
-function areRidePointsEqual(first: RidePoint, second: RidePoint) {
-  return (
-    Object.is(first.recordedAt, second.recordedAt) &&
-    Object.is(first.latitude, second.latitude) &&
-    Object.is(first.longitude, second.longitude) &&
-    areOptionalNumbersEqual(first.altitude, second.altitude) &&
-    areOptionalNumbersEqual(first.speedMps, second.speedMps) &&
-    areOptionalNumbersEqual(first.heading, second.heading) &&
-    areOptionalNumbersEqual(
-      first.horizontalAccuracy,
-      second.horizontalAccuracy,
-    ) &&
-    areOptionalNumbersEqual(first.verticalAccuracy, second.verticalAccuracy)
-  );
-}
-
-function areRidePointListsEqual(
-  firstPoints: RidePoint[],
-  secondPoints: RidePoint[],
-) {
-  return (
-    firstPoints.length === secondPoints.length &&
-    firstPoints.every((point, index) =>
-      areRidePointsEqual(point, secondPoints[index]),
-    )
-  );
 }
 
 function getLocationAccuracy(settings: RideSettings) {
@@ -858,11 +808,17 @@ export function useForegroundRideRecorder(settings: RideSettings) {
   }
 
   async function startBackgroundRecordingIfNeeded() {
-    if (isBackgroundRecordingRef.current) {
-      return true;
-    }
-
     try {
+      if (isBackgroundRecordingRef.current) {
+        const isStarted = await isBackgroundRideRecordingStarted();
+
+        if (isStarted) {
+          return true;
+        }
+
+        isBackgroundRecordingRef.current = false;
+      }
+
       const backgroundStarted = await startBackgroundRideRecording(
         settingsRef.current,
       );
@@ -980,6 +936,9 @@ export function useForegroundRideRecorder(settings: RideSettings) {
         );
       }
 
+      // Pull in background samples before and after the handoff so foreground
+      // resumes from the latest persisted point while the Android background
+      // service stays registered for the next background transition.
       await syncPersistedRidePoints();
       if (!isCurrentTransition('recording')) {
         return;
@@ -988,6 +947,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
       if (!isCurrentTransition('recording')) {
         return;
       }
+      await syncPersistedRidePoints();
       scheduleResumePointSync();
       return;
     }
@@ -996,18 +956,16 @@ export function useForegroundRideRecorder(settings: RideSettings) {
     shouldSyncBeforeNextLocationRef.current = false;
     const backgroundStarted = await startBackgroundRecordingIfNeeded();
 
-    if (
-      !isCurrentTransition('recording') ||
-      AppState.currentState === 'active'
-    ) {
+    if (!isCurrentTransition('recording')) {
+      return;
+    }
+
+    if (!backgroundStarted) {
+      setError(BACKGROUND_LOCATION_UNAVAILABLE_ERROR);
       return;
     }
 
     await stopWatchingLocation();
-
-    if (!backgroundStarted) {
-      setError(BACKGROUND_LOCATION_UNAVAILABLE_ERROR);
-    }
   }
 
   useEffect(() => {
@@ -1065,7 +1023,6 @@ export function useForegroundRideRecorder(settings: RideSettings) {
       setRideStatus('recording');
       startTimer();
       await startWatchingBarometer();
-      await startWatchingLocation();
 
       if (backgroundPermission.status !== Location.PermissionStatus.GRANTED) {
         setError(BACKGROUND_LOCATION_START_WARNING);
@@ -1077,6 +1034,7 @@ export function useForegroundRideRecorder(settings: RideSettings) {
         }
       }
 
+      await startWatchingLocation();
       await syncKeepAwake();
     } finally {
       endRideTransition();
@@ -1129,6 +1087,17 @@ export function useForegroundRideRecorder(settings: RideSettings) {
       setRideStatus('recording');
       startTimer();
       await startWatchingBarometer();
+      const backgroundPermission = await getBackgroundLocationPermission();
+
+      if (backgroundPermission.status === Location.PermissionStatus.GRANTED) {
+        const backgroundStarted = await startBackgroundRecordingIfNeeded();
+
+        if (!backgroundStarted) {
+          setError(BACKGROUND_LOCATION_UNAVAILABLE_ERROR);
+        }
+      } else {
+        setError(BACKGROUND_LOCATION_START_WARNING);
+      }
 
       if (watchRef.current == null) {
         await startWatchingLocation();

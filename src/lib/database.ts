@@ -74,6 +74,34 @@ export async function initializeDatabase() {
     await db.execAsync('ALTER TABLE rides ADD COLUMN title TEXT');
   }
 
+  if (!rideColumnNames.has('ended_at')) {
+    await db.execAsync('ALTER TABLE rides ADD COLUMN ended_at INTEGER');
+  }
+
+  if (!rideColumnNames.has('elapsed_seconds')) {
+    await db.execAsync(
+      'ALTER TABLE rides ADD COLUMN elapsed_seconds INTEGER NOT NULL DEFAULT 0',
+    );
+  }
+
+  if (!rideColumnNames.has('moving_seconds')) {
+    await db.execAsync(
+      'ALTER TABLE rides ADD COLUMN moving_seconds INTEGER NOT NULL DEFAULT 0',
+    );
+  }
+
+  if (!rideColumnNames.has('distance_meters')) {
+    await db.execAsync(
+      'ALTER TABLE rides ADD COLUMN distance_meters REAL NOT NULL DEFAULT 0',
+    );
+  }
+
+  if (!rideColumnNames.has('ascent_meters')) {
+    await db.execAsync(
+      'ALTER TABLE rides ADD COLUMN ascent_meters REAL NOT NULL DEFAULT 0',
+    );
+  }
+
   if (!rideColumnNames.has('active_calories_kcal')) {
     await db.execAsync(
       'ALTER TABLE rides ADD COLUMN active_calories_kcal REAL',
@@ -82,5 +110,23 @@ export async function initializeDatabase() {
 
   if (!rideColumnNames.has('feeling_rating')) {
     await db.execAsync('ALTER TABLE rides ADD COLUMN feeling_rating INTEGER');
+  }
+
+  if (!rideColumnNames.has('average_speed_mps')) {
+    await db.execAsync(
+      'ALTER TABLE rides ADD COLUMN average_speed_mps REAL NOT NULL DEFAULT 0',
+    );
+  }
+
+  if (!rideColumnNames.has('max_speed_mps')) {
+    await db.execAsync(
+      'ALTER TABLE rides ADD COLUMN max_speed_mps REAL NOT NULL DEFAULT 0',
+    );
+  }
+
+  if (!rideColumnNames.has('unit_preference')) {
+    await db.execAsync(
+      "ALTER TABLE rides ADD COLUMN unit_preference TEXT NOT NULL DEFAULT 'imperial'",
+    );
   }
 }
