@@ -99,6 +99,34 @@ function cloneMetrics(metrics: RideMetrics): RideMetrics {
   return { ...metrics };
 }
 
+function normalizePauseIntervals(
+  pauseIntervals: RidePauseInterval[],
+): RidePauseInterval[] {
+  const sortedPauseIntervals = pauseIntervals
+    .filter((pauseInterval) => pauseInterval.endedAt > pauseInterval.startedAt)
+    .toSorted((a, b) => a.startedAt - b.startedAt);
+  const normalizedPauseIntervals: RidePauseInterval[] = [];
+
+  for (const pauseInterval of sortedPauseIntervals) {
+    const previousPauseInterval = normalizedPauseIntervals.at(-1);
+
+    if (
+      previousPauseInterval == null ||
+      pauseInterval.startedAt > previousPauseInterval.endedAt
+    ) {
+      normalizedPauseIntervals.push({ ...pauseInterval });
+      continue;
+    }
+
+    previousPauseInterval.endedAt = Math.max(
+      previousPauseInterval.endedAt,
+      pauseInterval.endedAt,
+    );
+  }
+
+  return normalizedPauseIntervals;
+}
+
 function withAccumulatorEstimatedCalories(
   metrics: RideMetrics,
   settings: RideSettings,
@@ -166,57 +194,42 @@ export function createRideRecordingAccumulator({
     return secondsBetween(scopedStartedAt, endedAt);
   }
 
-  function getInProgressPauseSeconds(
-    pausedStartedAt: number | null,
-    now = Date.now(),
-  ) {
-    if (pausedStartedAt == null) {
-      return {
-        pausedSeconds: 0,
-        lapPausedSeconds: 0,
-      };
-    }
-
-    const timingNow = getTimingNow(now);
-
-    return {
-      pausedSeconds: secondsBetween(pausedStartedAt, timingNow),
-      lapPausedSeconds: getLapPauseSeconds(pausedStartedAt, timingNow),
-    };
+  function getPauseSeconds(pauseIntervals: RidePauseInterval[]) {
+    return pauseIntervals.reduce(
+      (total, pauseInterval) =>
+        total + secondsBetween(pauseInterval.startedAt, pauseInterval.endedAt),
+      0,
+    );
   }
 
-  function getTimingMetrics(now = Date.now()): TimingMetrics {
-    const elapsedSeconds = getElapsedSeconds(now);
-    const lapElapsedSeconds = getLapElapsedSeconds(now);
-    const inProgressAutoPauseSeconds = getInProgressPauseSeconds(
-      autoPausedStartedAt,
-      now,
+  function getLapPauseSecondsFromIntervals(
+    pauseIntervals: RidePauseInterval[],
+  ) {
+    return pauseIntervals.reduce(
+      (total, pauseInterval) =>
+        total +
+        getLapPauseSeconds(pauseInterval.startedAt, pauseInterval.endedAt),
+      0,
     );
-    const inProgressManualPauseSeconds = getInProgressPauseSeconds(
-      manualPausedStartedAt,
-      now,
-    );
-    const pausedSeconds = Math.min(
-      elapsedSeconds,
-      committedPausedSeconds +
-        inProgressAutoPauseSeconds.pausedSeconds +
-        inProgressManualPauseSeconds.pausedSeconds,
-    );
-    const lapPausedSeconds = Math.min(
-      lapElapsedSeconds,
-      committedLapPausedSeconds +
-        inProgressAutoPauseSeconds.lapPausedSeconds +
-        inProgressManualPauseSeconds.lapPausedSeconds,
-    );
+  }
 
-    return {
-      elapsedSeconds,
-      movingSeconds: Math.max(0, elapsedSeconds - pausedSeconds),
-      pausedSeconds,
-      lapElapsedSeconds,
-      lapPausedSeconds,
-      lapMovingSeconds: Math.max(0, lapElapsedSeconds - lapPausedSeconds),
-    };
+  function openPauseInterval(startedAt: number | null, now = Date.now()) {
+    return startedAt != null && getTimingNow(now) > startedAt
+      ? [{ startedAt, endedAt: getTimingNow(now) }]
+      : [];
+  }
+
+  function getNormalizedPauseIntervals(now = Date.now()) {
+    return normalizePauseIntervals([
+      ...pauseIntervals,
+      ...openPauseInterval(manualPausedStartedAt, now),
+      ...openPauseInterval(autoPausedStartedAt, now),
+    ]);
+  }
+
+  function refreshCommittedPauseSeconds() {
+    committedPausedSeconds = getPauseSeconds(pauseIntervals);
+    committedLapPausedSeconds = getLapPauseSecondsFromIntervals(pauseIntervals);
   }
 
   function applyMetrics(nextMetrics: RideMetrics) {
@@ -247,12 +260,45 @@ export function createRideRecordingAccumulator({
     return timingMetrics;
   }
 
+  function getTimingMetrics(now = Date.now()): TimingMetrics {
+    const elapsedSeconds = getElapsedSeconds(now);
+    const lapElapsedSeconds = getLapElapsedSeconds(now);
+    const hasOpenPause =
+      manualPausedStartedAt != null || autoPausedStartedAt != null;
+    const normalizedPauseIntervals = getNormalizedPauseIntervals(now);
+    const pausedSeconds = Math.min(
+      elapsedSeconds,
+      hasOpenPause
+        ? getPauseSeconds(normalizedPauseIntervals)
+        : committedPausedSeconds,
+    );
+    const lapPausedSeconds = Math.min(
+      lapElapsedSeconds,
+      hasOpenPause
+        ? getLapPauseSecondsFromIntervals(normalizedPauseIntervals)
+        : committedLapPausedSeconds,
+    );
+
+    return {
+      elapsedSeconds,
+      movingSeconds: Math.max(0, elapsedSeconds - pausedSeconds),
+      pausedSeconds,
+      lapElapsedSeconds,
+      lapPausedSeconds,
+      lapMovingSeconds: Math.max(0, lapElapsedSeconds - lapPausedSeconds),
+    };
+  }
+
   function recordPauseInterval(startedAt: number, endedAt: number) {
     if (endedAt <= startedAt) {
       return;
     }
 
-    pauseIntervals = [...pauseIntervals, { startedAt, endedAt }];
+    pauseIntervals = normalizePauseIntervals([
+      ...pauseIntervals,
+      { startedAt, endedAt },
+    ]);
+    refreshCommittedPauseSeconds();
   }
 
   function commitPauseInterval(startedAt: number, endedAt: number) {
@@ -287,12 +333,6 @@ export function createRideRecordingAccumulator({
     commitPauseInterval(pausedStartedAt, getTimingNow(now));
   }
 
-  function openPauseInterval(startedAt: number | null, now = Date.now()) {
-    return startedAt != null && getTimingNow(now) > startedAt
-      ? [{ startedAt, endedAt: getTimingNow(now) }]
-      : [];
-  }
-
   return {
     updateSettings(nextSettings) {
       settings = nextSettings;
@@ -311,11 +351,7 @@ export function createRideRecordingAccumulator({
       return isAutoPaused;
     },
     getPauseIntervals(now = Date.now()) {
-      return [
-        ...pauseIntervals,
-        ...openPauseInterval(manualPausedStartedAt, now),
-        ...openPauseInterval(autoPausedStartedAt, now),
-      ];
+      return getNormalizedPauseIntervals(now);
     },
     refreshTiming(now = Date.now()) {
       refreshTimingState(now);
@@ -406,6 +442,7 @@ export function createRideRecordingAccumulator({
 
       commitManualPausedTime(timingNow);
       commitAutoPausedTime(timingNow);
+      isAutoPaused = false;
       stoppedAt = timingNow;
       refreshTimingState(timingNow);
 

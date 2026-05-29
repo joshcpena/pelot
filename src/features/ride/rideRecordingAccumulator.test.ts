@@ -176,4 +176,83 @@ describe('ride recording accumulator timing', () => {
       lapActiveCaloriesKcal: 0,
     });
   });
+
+  it('counts overlapping manual and auto pauses once for total and lap timing', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings(),
+      startedAt: BASE_TIME,
+    });
+
+    accumulator.setAutoPaused(true, BASE_TIME + 10_000);
+    accumulator.beginManualPause(BASE_TIME + 20_000);
+    accumulator.refreshTiming(BASE_TIME + 25_000);
+
+    expect(accumulator.getMetrics()).toMatchObject({
+      elapsedSeconds: 25,
+      pausedSeconds: 15,
+      movingSeconds: 10,
+      lapElapsedSeconds: 25,
+      lapPausedSeconds: 15,
+      lapMovingSeconds: 10,
+    });
+    expect(accumulator.getPauseIntervals(BASE_TIME + 25_000)).toEqual([
+      { startedAt: BASE_TIME + 10_000, endedAt: BASE_TIME + 25_000 },
+    ]);
+
+    accumulator.setAutoPaused(false, BASE_TIME + 30_000);
+    accumulator.refreshTiming(BASE_TIME + 35_000);
+
+    expect(accumulator.getMetrics()).toMatchObject({
+      elapsedSeconds: 35,
+      pausedSeconds: 25,
+      movingSeconds: 10,
+      lapElapsedSeconds: 35,
+      lapPausedSeconds: 25,
+      lapMovingSeconds: 10,
+    });
+    expect(accumulator.getPauseIntervals(BASE_TIME + 35_000)).toEqual([
+      { startedAt: BASE_TIME + 10_000, endedAt: BASE_TIME + 35_000 },
+    ]);
+
+    accumulator.endManualPause(BASE_TIME + 40_000);
+    accumulator.refreshTiming(BASE_TIME + 50_000);
+
+    expect(accumulator.getMetrics()).toMatchObject({
+      elapsedSeconds: 50,
+      pausedSeconds: 30,
+      movingSeconds: 20,
+      lapElapsedSeconds: 50,
+      lapPausedSeconds: 30,
+      lapMovingSeconds: 20,
+    });
+    expect(accumulator.getPauseIntervals()).toEqual([
+      { startedAt: BASE_TIME + 10_000, endedAt: BASE_TIME + 40_000 },
+    ]);
+  });
+
+  it('clears auto pause state when finishing while auto-paused', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings(),
+      startedAt: BASE_TIME,
+    });
+
+    accumulator.setAutoPaused(true, BASE_TIME + 10_000);
+    const snapshot = accumulator.finish(BASE_TIME + 40_000);
+
+    expect(snapshot.metrics).toMatchObject({
+      elapsedSeconds: 40,
+      pausedSeconds: 30,
+      movingSeconds: 10,
+      lapElapsedSeconds: 40,
+      lapPausedSeconds: 30,
+      lapMovingSeconds: 10,
+    });
+    expect(snapshot.pauseIntervals).toEqual([
+      { startedAt: BASE_TIME + 10_000, endedAt: BASE_TIME + 40_000 },
+    ]);
+    expect(accumulator.getIsAutoPaused()).toBe(false);
+    expect(accumulator.getPauseIntervals(BASE_TIME + 50_000)).toEqual([
+      { startedAt: BASE_TIME + 10_000, endedAt: BASE_TIME + 40_000 },
+    ]);
+  });
 });
