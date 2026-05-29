@@ -3,10 +3,7 @@ import {
   positiveElevationGainMeters,
   withEstimatedCalories,
 } from './metrics';
-import {
-  calculateMetricsFromPoints,
-  type RidePauseInterval,
-} from './rideCalculations';
+import type { RidePauseInterval } from './rideCalculations';
 import { areRidePointListsEqual, mergeRidePoints } from './ridePoints';
 import type {
   RideMetrics,
@@ -92,6 +89,16 @@ type TimingMetrics = Pick<
   | 'lapMovingSeconds'
 >;
 
+type ReplayRouteMetrics = Pick<
+  RideMetrics,
+  | 'distanceMeters'
+  | 'ascentMeters'
+  | 'elapsedSeconds'
+  | 'movingSeconds'
+  | 'currentSpeedMps'
+  | 'maxSpeedMps'
+>;
+
 function secondsBetween(startedAt: number, endedAt: number) {
   return Math.max(0, Math.floor((endedAt - startedAt) / 1000));
 }
@@ -101,6 +108,118 @@ function toRouteCoordinate(point: RidePoint): RouteCoordinate {
     latitude: point.latitude,
     longitude: point.longitude,
   };
+}
+
+function doesSegmentOverlapPause(
+  segmentStartedAt: number,
+  segmentEndedAt: number,
+  pauseIntervals: RidePauseInterval[],
+) {
+  return pauseIntervals.some(
+    (pause) =>
+      segmentStartedAt < pause.endedAt && segmentEndedAt > pause.startedAt,
+  );
+}
+
+function getSegmentSeconds(previous: RidePoint, next: RidePoint) {
+  return Math.max(
+    0,
+    Math.round((next.recordedAt - previous.recordedAt) / 1000),
+  );
+}
+
+function getAccumulatorReplaySpeed(
+  previous: RidePoint,
+  next: RidePoint,
+  distanceMeters: number,
+  seconds: number,
+) {
+  const reportedSpeed = next.speedMps ?? 0;
+  const calculatedSpeed = seconds > 0 ? distanceMeters / seconds : 0;
+
+  return Math.max(0, reportedSpeed || calculatedSpeed);
+}
+
+function calculateAccumulatorReplayMetrics(
+  points: RidePoint[],
+  pauseIntervals: RidePauseInterval[] = [],
+): ReplayRouteMetrics {
+  let distanceMeters = 0;
+  let ascentMeters = 0;
+  let movingSeconds = 0;
+  let currentSpeedMps = points.length === 1 ? (points[0].speedMps ?? 0) : 0;
+  let maxSpeedMps = 0;
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const next = points[index];
+    const seconds = getSegmentSeconds(previous, next);
+    const distance = distanceBetweenMeters(previous, next);
+    const speed = getAccumulatorReplaySpeed(previous, next, distance, seconds);
+
+    currentSpeedMps = speed;
+
+    if (
+      doesSegmentOverlapPause(
+        previous.recordedAt,
+        next.recordedAt,
+        pauseIntervals,
+      )
+    ) {
+      continue;
+    }
+
+    distanceMeters += distance;
+    ascentMeters += positiveElevationGainMeters(previous, next);
+    movingSeconds += seconds;
+    maxSpeedMps = Math.max(maxSpeedMps, speed);
+  }
+
+  const elapsedSeconds =
+    points.length > 1
+      ? Math.max(
+          0,
+          Math.round(
+            (points[points.length - 1].recordedAt - points[0].recordedAt) /
+              1000,
+          ),
+        )
+      : 0;
+
+  return {
+    distanceMeters,
+    ascentMeters,
+    elapsedSeconds,
+    movingSeconds,
+    currentSpeedMps,
+    maxSpeedMps,
+  };
+}
+
+function getAccumulatorReplayLapPoints(
+  points: RidePoint[],
+  lapStartedAt: number | null,
+) {
+  if (lapStartedAt == null) {
+    return points;
+  }
+
+  const firstPointInLapIndex = points.findIndex(
+    (point) => point.recordedAt >= lapStartedAt,
+  );
+
+  if (firstPointInLapIndex < 0) {
+    return points.length > 0 ? [points[points.length - 1]] : [];
+  }
+
+  if (
+    points[firstPointInLapIndex].recordedAt === lapStartedAt ||
+    firstPointInLapIndex === 0
+  ) {
+    return points.slice(firstPointInLapIndex);
+  }
+
+  return points.slice(firstPointInLapIndex - 1);
 }
 
 function cloneMetrics(metrics: RideMetrics): RideMetrics {
@@ -448,19 +567,14 @@ export function createRideRecordingAccumulator({
     }
 
     const pauseIntervalsForReplay = getNormalizedPauseIntervals(now);
-    const totalMetrics = calculateMetricsFromPoints(
+    const totalMetrics = calculateAccumulatorReplayMetrics(
       routePoints,
       pauseIntervalsForReplay,
     );
     const timingMetrics = getTimingMetrics(now);
     const lapStartedAt = metrics.lapStartedAt;
-    const lapPoints =
-      lapStartedAt == null
-        ? routePoints
-        : routePoints.filter(
-            (routePoint) => routePoint.recordedAt >= lapStartedAt,
-          );
-    const lapMetrics = calculateMetricsFromPoints(
+    const lapPoints = getAccumulatorReplayLapPoints(routePoints, lapStartedAt);
+    const lapMetrics = calculateAccumulatorReplayMetrics(
       lapPoints,
       pauseIntervalsForReplay,
     );

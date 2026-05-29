@@ -361,6 +361,37 @@ describe('ride point ingestion', () => {
     expect(accumulator.getMetrics().maxSpeedMps).toBe(22);
   });
 
+  it('replays zero reported speed with calculated speed like live ingestion', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({ autoPause: false }),
+      startedAt: BASE_TIME,
+    });
+    const routePoints = [
+      pointAtMeters(0, 0),
+      pointAtMeters(10, 100, { speedMps: 0 }),
+    ];
+
+    accumulator.ingestPoint(routePoints[0], BASE_TIME);
+    accumulator.ingestPoint(routePoints[1], BASE_TIME + 10_000);
+
+    const liveCurrentSpeedMps = accumulator.getMetrics().currentSpeedMps;
+    const liveMaxSpeedMps = accumulator.getMetrics().maxSpeedMps;
+
+    expect(liveCurrentSpeedMps).toBeCloseTo(10, 6);
+    expect(liveMaxSpeedMps).toBeCloseTo(10, 6);
+
+    accumulator.replacePointsFromPersistence(routePoints, BASE_TIME + 10_000);
+
+    expect(accumulator.getMetrics().currentSpeedMps).toBeCloseTo(
+      liveCurrentSpeedMps,
+      6,
+    );
+    expect(accumulator.getMetrics().maxSpeedMps).toBeCloseTo(
+      liveMaxSpeedMps,
+      6,
+    );
+  });
+
   it('does not count the segment that enters or leaves auto-pause', () => {
     const accumulator = createRideRecordingAccumulator({
       settings: settings({ autoPause: true }),
@@ -632,6 +663,43 @@ describe('ride point ingestion', () => {
       lapNumber: 1,
     });
     expect(accumulator.getMetrics().lapDistanceMeters).toBeCloseTo(110, 6);
+  });
+
+  it('replays manual lap boundary segments like live ingestion', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({ autoPause: false }),
+      startedAt: BASE_TIME,
+    });
+    const routePoints = [
+      pointAtMeters(0, 0, { altitude: 0 }),
+      pointAtMeters(10, 100, { altitude: 0 }),
+      pointAtMeters(20, 250, { altitude: 4, speedMps: 0 }),
+    ];
+
+    accumulator.ingestPoint(routePoints[0], BASE_TIME);
+    accumulator.ingestPoint(routePoints[1], BASE_TIME + 10_000);
+    accumulator.markLap(BASE_TIME + 15_000);
+    accumulator.ingestPoint(routePoints[2], BASE_TIME + 20_000);
+
+    const liveMetrics = accumulator.getMetrics();
+
+    expect(liveMetrics.lapDistanceMeters).toBeCloseTo(150, 6);
+    expect(liveMetrics.lapAscentMeters).toBe(4);
+    expect(liveMetrics.lapMaxSpeedMps).toBeCloseTo(15, 6);
+
+    accumulator.replacePointsFromPersistence(routePoints, BASE_TIME + 30_000);
+
+    expect(accumulator.getMetrics().lapDistanceMeters).toBeCloseTo(
+      liveMetrics.lapDistanceMeters,
+      6,
+    );
+    expect(accumulator.getMetrics().lapAscentMeters).toBe(
+      liveMetrics.lapAscentMeters,
+    );
+    expect(accumulator.getMetrics().lapMaxSpeedMps).toBeCloseTo(
+      liveMetrics.lapMaxSpeedMps,
+      6,
+    );
   });
 
   it('anchors auto-pause entry at sample time so replay keeps stopped segment excluded', () => {
