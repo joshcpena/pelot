@@ -734,6 +734,35 @@ describe('ride point ingestion', () => {
     ]);
   });
 
+  it('anchors auto-pause exit at sample time so replay keeps resumed movement', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({ autoPause: true }),
+      startedAt: BASE_TIME,
+    });
+    const routePoints = [
+      pointAtMeters(0, 0, { speedMps: 10 }),
+      pointAtMeters(10, 2, { speedMps: 0.2 }),
+      pointAtMeters(20, 102, { speedMps: 10 }),
+      pointAtMeters(30, 202, { speedMps: 10 }),
+    ];
+
+    accumulator.ingestPoint(routePoints[0], BASE_TIME + 500);
+    accumulator.ingestPoint(routePoints[1], BASE_TIME + 10_500);
+    accumulator.ingestPoint(routePoints[2], BASE_TIME + 20_500);
+    accumulator.ingestPoint(routePoints[3], BASE_TIME + 30_500);
+
+    expect(accumulator.getIsAutoPaused()).toBe(false);
+    expect(accumulator.getMetrics().distanceMeters).toBeCloseTo(100, 6);
+    expect(accumulator.getPauseIntervals(BASE_TIME + 30_500)).toEqual([
+      { startedAt: BASE_TIME, endedAt: BASE_TIME + 20_000 },
+    ]);
+
+    accumulator.replacePointsFromPersistence(routePoints, BASE_TIME + 30_500);
+
+    expect(accumulator.getMetrics().distanceMeters).toBeCloseTo(100, 6);
+    expect(accumulator.getMetrics().lapDistanceMeters).toBeCloseTo(100, 6);
+  });
+
   it('replays max speed from auto-pause boundary segments like live ingestion', () => {
     const accumulator = createRideRecordingAccumulator({
       settings: settings({ autoPause: true }),

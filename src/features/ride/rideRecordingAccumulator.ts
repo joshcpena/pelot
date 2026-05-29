@@ -278,11 +278,14 @@ export function createRideRecordingAccumulator({
   startedAt: number;
 }): RideRecordingAccumulator {
   let settings = initialSettings;
-  let metrics: RideMetrics = {
-    ...initialRideRecordingMetrics,
-    startedAt,
-    lapStartedAt: startedAt,
-  };
+  let metrics: RideMetrics = withAccumulatorEstimatedCalories(
+    {
+      ...initialRideRecordingMetrics,
+      startedAt,
+      lapStartedAt: startedAt,
+    },
+    initialSettings,
+  );
   let routePoints: RidePoint[] = [];
   let currentCoordinate: RouteCoordinate | null = null;
   let isAutoPaused = false;
@@ -715,7 +718,9 @@ export function createRideRecordingAccumulator({
       const autoPauseTransitionNow =
         nextAutoPaused && !wasAutoPaused && previous != null
           ? previous.recordedAt
-          : now;
+          : !nextAutoPaused && wasAutoPaused
+            ? point.recordedAt
+            : now;
 
       setAutoPausedState(nextAutoPaused, autoPauseTransitionNow);
       const timingMetrics = getTimingMetrics(now);

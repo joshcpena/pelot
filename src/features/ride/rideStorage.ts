@@ -1,7 +1,7 @@
 import { getDatabase, initializeDatabase } from '../../lib/database';
-import { withEstimatedCalories } from './metrics';
 import { buildRideSplits, type RideSplit } from './rideCalculations';
 import type { RideRecordingFinishSnapshot } from './rideRecordingAccumulator';
+import { getRidePointKey, mergeRidePoints } from './ridePoints';
 import type { RidePoint, RideSettings, UnitSystem } from './types';
 
 export { calculateMetricsFromPoints } from './rideCalculations';
@@ -344,8 +344,16 @@ export async function finishRide(
   finishSnapshot: RideRecordingFinishSnapshot,
   settings: RideSettings,
 ): Promise<FinishedRideSummary> {
-  const points = await loadRidePoints(rideId);
-  const metrics = withEstimatedCalories(finishSnapshot.metrics, settings);
+  const storedPoints = await loadRidePoints(rideId);
+  const storedPointKeys = new Set(storedPoints.map(getRidePointKey));
+  const missingSnapshotPoints = finishSnapshot.routePoints.filter(
+    (point) => !storedPointKeys.has(getRidePointKey(point)),
+  );
+
+  await insertRidePoints(rideId, missingSnapshotPoints, 'foreground-gps');
+
+  const points = mergeRidePoints(storedPoints, finishSnapshot.routePoints);
+  const metrics = finishSnapshot.metrics;
   const splits =
     points.length > 1
       ? buildRideSplits(points, settings, finishSnapshot.pauseIntervals)
