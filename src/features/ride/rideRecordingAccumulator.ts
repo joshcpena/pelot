@@ -104,7 +104,8 @@ function normalizePauseIntervals(
 ): RidePauseInterval[] {
   const sortedPauseIntervals = pauseIntervals
     .filter((pauseInterval) => pauseInterval.endedAt > pauseInterval.startedAt)
-    .toSorted((a, b) => a.startedAt - b.startedAt);
+    .slice()
+    .sort((a, b) => a.startedAt - b.startedAt);
   const normalizedPauseIntervals: RidePauseInterval[] = [];
 
   for (const pauseInterval of sortedPauseIntervals) {
@@ -302,14 +303,10 @@ export function createRideRecordingAccumulator({
   }
 
   function commitPauseInterval(startedAt: number, endedAt: number) {
-    const pausedSeconds = secondsBetween(startedAt, endedAt);
-
-    if (pausedSeconds <= 0) {
+    if (endedAt <= startedAt) {
       return;
     }
 
-    committedPausedSeconds += pausedSeconds;
-    committedLapPausedSeconds += getLapPauseSeconds(startedAt, endedAt);
     recordPauseInterval(startedAt, endedAt);
   }
 
