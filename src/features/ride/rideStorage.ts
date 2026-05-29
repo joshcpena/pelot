@@ -373,7 +373,7 @@ export async function finishRide(
          max_speed_mps = ?
      WHERE id = ?`,
     endedAt,
-    metrics.elapsedSeconds || finishSnapshot.metrics.elapsedSeconds,
+    metrics.elapsedSeconds,
     metrics.movingSeconds,
     metrics.distanceMeters,
     metrics.ascentMeters,
@@ -385,30 +385,22 @@ export async function finishRide(
 
   await replaceRideSplits(rideId, splits);
 
-  const savedMetrics = metrics.elapsedSeconds
-    ? metrics
-    : {
-        ...metrics,
-        elapsedSeconds: finishSnapshot.metrics.elapsedSeconds,
-      };
-
   const summary = await loadRideSummary(rideId);
 
   return {
     summary: summary ?? {
       id: rideId,
       title: null,
-      startedAt:
-        savedMetrics.startedAt ?? finishSnapshot.metrics.startedAt ?? endedAt,
+      startedAt: metrics.startedAt ?? endedAt,
       endedAt,
-      elapsedSeconds: savedMetrics.elapsedSeconds,
-      movingSeconds: savedMetrics.movingSeconds,
-      distanceMeters: savedMetrics.distanceMeters,
-      ascentMeters: savedMetrics.ascentMeters,
-      activeCaloriesKcal: savedMetrics.activeCaloriesKcal,
+      elapsedSeconds: metrics.elapsedSeconds,
+      movingSeconds: metrics.movingSeconds,
+      distanceMeters: metrics.distanceMeters,
+      ascentMeters: metrics.ascentMeters,
+      activeCaloriesKcal: metrics.activeCaloriesKcal,
       feelingRating: null,
-      averageSpeedMps: savedMetrics.averageSpeedMps,
-      maxSpeedMps: savedMetrics.maxSpeedMps,
+      averageSpeedMps: metrics.averageSpeedMps,
+      maxSpeedMps: metrics.maxSpeedMps,
       unitPreference: settings.unitSystem,
     },
     points,

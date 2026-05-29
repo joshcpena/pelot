@@ -534,6 +534,33 @@ describe('ride point ingestion', () => {
     expect(accumulator.getMetrics().lapDistanceMeters).toBeCloseTo(200, 6);
   });
 
+  it('uses replayed post-resume points as the manual pause baseline', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({ autoPause: false }),
+      startedAt: BASE_TIME,
+    });
+
+    const prePausePoint = pointAtMeters(0, 0);
+    const replayedPrePausePoint = pointAtMeters(10, 100);
+    const replayedPostResumePoint = pointAtMeters(40, 400);
+
+    accumulator.ingestPoint(prePausePoint, BASE_TIME);
+    accumulator.ingestPoint(replayedPrePausePoint, BASE_TIME + 10_000);
+    accumulator.beginManualPause(BASE_TIME + 15_000);
+    accumulator.endManualPause(BASE_TIME + 30_000);
+    accumulator.replacePointsFromPersistence(
+      [prePausePoint, replayedPrePausePoint, replayedPostResumePoint],
+      BASE_TIME + 45_000,
+    );
+
+    expect(accumulator.getMetrics().distanceMeters).toBeCloseTo(100, 6);
+
+    accumulator.ingestPoint(pointAtMeters(50, 500), BASE_TIME + 50_000);
+
+    expect(accumulator.getMetrics().distanceMeters).toBeCloseTo(200, 6);
+    expect(accumulator.getMetrics().lapDistanceMeters).toBeCloseTo(200, 6);
+  });
+
   it('resets route metrics when replay replaces movement with one point', () => {
     const accumulator = createRideRecordingAccumulator({
       settings: settings({ autoPause: false }),

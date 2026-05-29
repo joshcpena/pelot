@@ -297,6 +297,7 @@ export function createRideRecordingAccumulator({
   let committedLapPausedSeconds = 0;
   let stoppedAt: number | null = null;
   let hasPendingManualPauseBaselineReset = false;
+  let manualPauseBaselineResetEndedAt: number | null = null;
 
   function getTimingNow(now = Date.now()) {
     return stoppedAt ?? now;
@@ -443,7 +444,7 @@ export function createRideRecordingAccumulator({
 
   function commitManualPausedTime(now = Date.now()) {
     if (manualPausedStartedAt == null) {
-      return false;
+      return null;
     }
 
     const pausedStartedAt = manualPausedStartedAt;
@@ -451,7 +452,7 @@ export function createRideRecordingAccumulator({
     const pausedEndedAt = getTimingNow(now);
     commitPauseInterval(pausedStartedAt, pausedEndedAt);
 
-    return pausedEndedAt > pausedStartedAt;
+    return pausedEndedAt > pausedStartedAt ? pausedEndedAt : null;
   }
 
   function commitAutoPausedTime(now = Date.now()) {
@@ -538,9 +539,32 @@ export function createRideRecordingAccumulator({
   ) {
     routePoints = [...points];
     const latestRoutePoint = routePoints.at(-1) ?? null;
-    previousPoint = hasPendingManualPauseBaselineReset
-      ? null
-      : latestRoutePoint;
+
+    if (
+      hasPendingManualPauseBaselineReset &&
+      manualPauseBaselineResetEndedAt != null
+    ) {
+      let replayedResumeBaseline: RidePoint | null = null;
+
+      for (const routePoint of routePoints) {
+        if (routePoint.recordedAt >= manualPauseBaselineResetEndedAt) {
+          replayedResumeBaseline = routePoint;
+        }
+      }
+
+      if (replayedResumeBaseline) {
+        previousPoint = replayedResumeBaseline;
+        hasPendingManualPauseBaselineReset = false;
+        manualPauseBaselineResetEndedAt = null;
+      } else {
+        previousPoint = null;
+      }
+    } else {
+      previousPoint = hasPendingManualPauseBaselineReset
+        ? null
+        : latestRoutePoint;
+    }
+
     currentCoordinate =
       latestRoutePoint == null ? null : toRouteCoordinate(latestRoutePoint);
 
@@ -649,10 +673,11 @@ export function createRideRecordingAccumulator({
       return { didAutoLap: false };
     },
     endManualPause(now = Date.now()) {
-      const didCloseManualPause = commitManualPausedTime(now);
+      const manualPauseEndedAt = commitManualPausedTime(now);
 
-      if (didCloseManualPause) {
+      if (manualPauseEndedAt != null) {
         hasPendingManualPauseBaselineReset = true;
+        manualPauseBaselineResetEndedAt = manualPauseEndedAt;
         previousPoint = null;
       }
 
@@ -757,6 +782,7 @@ export function createRideRecordingAccumulator({
       routePoints = [...routePoints, point];
       previousPoint = point;
       hasPendingManualPauseBaselineReset = false;
+      manualPauseBaselineResetEndedAt = null;
       applyMetrics(
         withAccumulatorEstimatedCalories(
           {
