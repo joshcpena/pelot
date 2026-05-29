@@ -6,6 +6,7 @@ import {
   distanceToRouteMeters,
   getRerouteCandidate,
 } from './activeRideNavigation';
+import type { ActiveRideNavigationSnapshot } from './activeRideNavigation';
 import type { PlannedRoute, RidePoint, RouteCoordinate } from './types';
 
 function coordinate(latitude: number, longitude: number): RouteCoordinate {
@@ -36,6 +37,14 @@ function plannedRoute(coordinates: RouteCoordinate[]): PlannedRoute {
   };
 }
 
+// @ts-expect-error currentCoordinate must be present even when it is null.
+const snapshotWithoutCurrentCoordinate: ActiveRideNavigationSnapshot = {
+  rideStatus: 'recording',
+  routePoints: [],
+  routeProfile: 'bike',
+};
+void snapshotWithoutCurrentCoordinate;
+
 describe('distanceToRouteMeters', () => {
   it('returns infinity when no route coordinates exist', () => {
     expect(distanceToRouteMeters(coordinate(38, -77), [])).toBe(
@@ -56,6 +65,14 @@ describe('distanceToRouteMeters', () => {
 
 describe('getRerouteCandidate', () => {
   it('does nothing without recording, route, and destination state', () => {
+    const route = plannedRoute([coordinate(0, 0), coordinate(0, 0.01)]);
+    const destination = {
+      id: 'coffee',
+      name: 'Coffee',
+      address: null,
+      coordinate: coordinate(0, 0.01),
+    };
+
     expect(
       getRerouteCandidate({
         now: 1_000,
@@ -67,13 +84,40 @@ describe('getRerouteCandidate', () => {
           currentCoordinate: coordinate(0.01, 0.01),
           routeProfile: 'bike',
         },
-        plannedRoute: plannedRoute([coordinate(0, 0), coordinate(0, 0.01)]),
-        selectedDestination: {
-          id: 'coffee',
-          name: 'Coffee',
-          address: null,
-          coordinate: coordinate(0, 0.01),
+        plannedRoute: route,
+        selectedDestination: destination,
+      }),
+    ).toBeNull();
+
+    expect(
+      getRerouteCandidate({
+        now: 40_000,
+        lastRerouteAt: 0,
+        isRerouteInFlight: false,
+        snapshot: {
+          rideStatus: 'recording',
+          routePoints: [],
+          currentCoordinate: coordinate(0.01, 0.01),
+          routeProfile: 'bike',
         },
+        plannedRoute: null,
+        selectedDestination: destination,
+      }),
+    ).toBeNull();
+
+    expect(
+      getRerouteCandidate({
+        now: 40_000,
+        lastRerouteAt: 0,
+        isRerouteInFlight: false,
+        snapshot: {
+          rideStatus: 'recording',
+          routePoints: [],
+          currentCoordinate: coordinate(0.01, 0.01),
+          routeProfile: 'bike',
+        },
+        plannedRoute: route,
+        selectedDestination: null,
       }),
     ).toBeNull();
   });

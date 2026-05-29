@@ -16,7 +16,7 @@ const EARTH_RADIUS_METERS = 6_371_000;
 export type ActiveRideNavigationSnapshot = {
   rideStatus: RideStatus;
   routePoints: RidePoint[];
-  currentCoordinate?: RouteCoordinate | null;
+  currentCoordinate: RouteCoordinate | null;
   routeProfile: RouteProfile;
 };
 
