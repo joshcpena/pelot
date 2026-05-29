@@ -293,3 +293,163 @@ describe('ride recording accumulator timing', () => {
     ]);
   });
 });
+
+const EARTH_RADIUS_METERS = 6_371_000;
+
+function pointAtMeters(
+  seconds: number,
+  metersEast: number,
+  overrides: Partial<RidePoint> = {},
+): RidePoint {
+  return point(seconds, {
+    longitude: (metersEast / EARTH_RADIUS_METERS) * (180 / Math.PI),
+    ...overrides,
+  });
+}
+
+describe('ride point ingestion', () => {
+  it('increments live route metrics for counted movement', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({ autoPause: false }),
+      startedAt: BASE_TIME,
+    });
+
+    expect(
+      accumulator.ingestPoint(pointAtMeters(0, 0), BASE_TIME),
+    ).toMatchObject({
+      didChangeRoutePoints: true,
+      shouldPersistPoint: true,
+      didAutoLap: false,
+    });
+    accumulator.ingestPoint(
+      pointAtMeters(10, 100, { altitude: 10 }),
+      BASE_TIME + 10_000,
+    );
+    accumulator.ingestPoint(
+      pointAtMeters(20, 250, { altitude: 14 }),
+      BASE_TIME + 20_000,
+    );
+
+    expect(accumulator.getRoutePoints()).toHaveLength(3);
+    expect(accumulator.getCurrentCoordinate()).toEqual({
+      latitude: 0,
+      longitude: (250 / EARTH_RADIUS_METERS) * (180 / Math.PI),
+    });
+    expect(accumulator.getMetrics().distanceMeters).toBeCloseTo(250, 6);
+    expect(accumulator.getMetrics().ascentMeters).toBe(4);
+    expect(accumulator.getMetrics().movingSeconds).toBe(20);
+    expect(accumulator.getMetrics().currentSpeedMps).toBeCloseTo(15, 6);
+    expect(accumulator.getMetrics().averageSpeedMps).toBeCloseTo(12.5, 6);
+    expect(accumulator.getMetrics().maxSpeedMps).toBeCloseTo(15, 6);
+    expect(accumulator.getMetrics().lapDistanceMeters).toBeCloseTo(250, 6);
+    expect(accumulator.getMetrics().lapAscentMeters).toBe(4);
+  });
+
+  it('uses reported speed for current and max speed when present', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({ autoPause: false }),
+      startedAt: BASE_TIME,
+    });
+
+    accumulator.ingestPoint(pointAtMeters(0, 0), BASE_TIME);
+    accumulator.ingestPoint(
+      pointAtMeters(10, 100, { speedMps: 22 }),
+      BASE_TIME + 10_000,
+    );
+
+    expect(accumulator.getMetrics().currentSpeedMps).toBe(22);
+    expect(accumulator.getMetrics().maxSpeedMps).toBe(22);
+  });
+
+  it('does not count the segment that enters or leaves auto-pause', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({ autoPause: true }),
+      startedAt: BASE_TIME,
+    });
+
+    accumulator.ingestPoint(pointAtMeters(0, 0), BASE_TIME);
+    accumulator.ingestPoint(
+      pointAtMeters(10, 2, { speedMps: 0.2 }),
+      BASE_TIME + 10_000,
+    );
+
+    expect(accumulator.getIsAutoPaused()).toBe(true);
+    expect(accumulator.getMetrics().distanceMeters).toBe(0);
+    expect(accumulator.getMetrics().movingSeconds).toBe(0);
+    expect(accumulator.getMetrics().pausedSeconds).toBe(10);
+
+    accumulator.ingestPoint(
+      pointAtMeters(20, 102, { speedMps: 10 }),
+      BASE_TIME + 20_000,
+    );
+
+    expect(accumulator.getIsAutoPaused()).toBe(false);
+    expect(accumulator.getMetrics().distanceMeters).toBe(0);
+    expect(accumulator.getPauseIntervals()).toEqual([
+      { startedAt: BASE_TIME, endedAt: BASE_TIME + 20_000 },
+    ]);
+
+    accumulator.ingestPoint(
+      pointAtMeters(30, 202, { speedMps: 10 }),
+      BASE_TIME + 30_000,
+    );
+
+    expect(accumulator.getMetrics().distanceMeters).toBeCloseTo(100, 6);
+    expect(accumulator.getMetrics().movingSeconds).toBe(10);
+  });
+
+  it('marks laps manually and through distance and time auto-lap rules', () => {
+    const distanceAccumulator = createRideRecordingAccumulator({
+      settings: settings({
+        autoPause: false,
+        autoLap: true,
+        splitType: 'distance',
+        splitDistanceMeters: 100,
+      }),
+      startedAt: BASE_TIME,
+    });
+
+    distanceAccumulator.ingestPoint(pointAtMeters(0, 0), BASE_TIME);
+    const distanceResult = distanceAccumulator.ingestPoint(
+      pointAtMeters(10, 110),
+      BASE_TIME + 10_000,
+    );
+
+    expect(distanceResult.didAutoLap).toBe(true);
+    expect(distanceAccumulator.getMetrics()).toMatchObject({
+      lapNumber: 2,
+      lapDistanceMeters: 0,
+      lapAscentMeters: 0,
+      lapMovingSeconds: 0,
+    });
+
+    const timeAccumulator = createRideRecordingAccumulator({
+      settings: settings({
+        autoPause: false,
+        autoLap: true,
+        splitType: 'time',
+        splitDurationSeconds: 10,
+      }),
+      startedAt: BASE_TIME,
+    });
+
+    timeAccumulator.refreshTiming(BASE_TIME + 10_000);
+
+    expect(timeAccumulator.getMetrics()).toMatchObject({
+      lapNumber: 2,
+      lapElapsedSeconds: 0,
+      lapMovingSeconds: 0,
+    });
+
+    timeAccumulator.markLap(BASE_TIME + 20_000);
+
+    expect(timeAccumulator.getMetrics()).toMatchObject({
+      lapNumber: 3,
+      lapStartedAt: BASE_TIME + 20_000,
+      lapDistanceMeters: 0,
+      lapAscentMeters: 0,
+      lapAverageSpeedMps: 0,
+      lapMaxSpeedMps: 0,
+    });
+  });
+});
