@@ -20,6 +20,15 @@ export type ActiveRideNavigationSnapshot = {
   routeProfile: RouteProfile;
 };
 
+export type ActiveRideNavigationOriginAdapter = {
+  getOrigin: (
+    snapshot: ActiveRideNavigationSnapshot,
+  ) => Promise<RouteCoordinate>;
+};
+
+export const ACTIVE_RIDE_NAVIGATION_LOCATION_PERMISSION_ERROR =
+  'Location permission is required to plan a route.';
+
 export type RerouteCandidateInput = {
   now: number;
   lastRerouteAt: number;
