@@ -1,0 +1,419 @@
+import { withEstimatedCalories } from './metrics';
+import type { RidePauseInterval } from './rideCalculations';
+import type {
+  RideMetrics,
+  RidePoint,
+  RideSettings,
+  RouteCoordinate,
+} from './types';
+
+export const RIDE_RECORDING_STOPPED_SPEED_MPS = 0.75;
+
+export const initialRideRecordingMetrics: RideMetrics = {
+  startedAt: null,
+  elapsedSeconds: 0,
+  movingSeconds: 0,
+  pausedSeconds: 0,
+  distanceMeters: 0,
+  ascentMeters: 0,
+  activeCaloriesKcal: null,
+  currentSpeedMps: 0,
+  averageSpeedMps: 0,
+  maxSpeedMps: 0,
+  lapNumber: 1,
+  lapStartedAt: null,
+  lapElapsedSeconds: 0,
+  lapPausedSeconds: 0,
+  lapMovingSeconds: 0,
+  lapDistanceMeters: 0,
+  lapAscentMeters: 0,
+  lapActiveCaloriesKcal: null,
+  lapAverageSpeedMps: 0,
+  lapMaxSpeedMps: 0,
+};
+
+export type RideRecordingPointIngestionResult = {
+  didChangeRoutePoints: boolean;
+  shouldPersistPoint: boolean;
+  didAutoLap: boolean;
+};
+
+export type RideRecordingTimingResult = {
+  didAutoLap: boolean;
+};
+
+export type RideRecordingFinishSnapshot = {
+  metrics: RideMetrics;
+  routePoints: RidePoint[];
+  pauseIntervals: RidePauseInterval[];
+};
+
+export type RideRecordingAccumulator = {
+  updateSettings(settings: RideSettings): void;
+  getMetrics(): RideMetrics;
+  getRoutePoints(): RidePoint[];
+  getCurrentCoordinate(): RouteCoordinate | null;
+  getIsAutoPaused(): boolean;
+  getPauseIntervals(now?: number): RidePauseInterval[];
+  refreshTiming(now?: number): RideRecordingTimingResult;
+  beginManualPause(now?: number): RideRecordingTimingResult;
+  endManualPause(now?: number): RideRecordingTimingResult;
+  setAutoPaused(
+    nextIsAutoPaused: boolean,
+    now?: number,
+  ): RideRecordingTimingResult;
+  markLap(now?: number): RideRecordingTimingResult;
+  ingestPoint(
+    point: RidePoint,
+    now?: number,
+  ): RideRecordingPointIngestionResult;
+  replacePointsFromPersistence(
+    points: RidePoint[],
+    now?: number,
+  ): RideRecordingTimingResult;
+  finish(now?: number): RideRecordingFinishSnapshot;
+};
+
+type TimingMetrics = Pick<
+  RideMetrics,
+  | 'elapsedSeconds'
+  | 'movingSeconds'
+  | 'pausedSeconds'
+  | 'lapElapsedSeconds'
+  | 'lapPausedSeconds'
+  | 'lapMovingSeconds'
+>;
+
+function secondsBetween(startedAt: number, endedAt: number) {
+  return Math.max(0, Math.floor((endedAt - startedAt) / 1000));
+}
+
+function toRouteCoordinate(point: RidePoint): RouteCoordinate {
+  return {
+    latitude: point.latitude,
+    longitude: point.longitude,
+  };
+}
+
+function cloneMetrics(metrics: RideMetrics): RideMetrics {
+  return { ...metrics };
+}
+
+function withAccumulatorEstimatedCalories(
+  metrics: RideMetrics,
+  settings: RideSettings,
+): RideMetrics {
+  const nextMetrics = withEstimatedCalories(metrics, settings);
+
+  return {
+    ...nextMetrics,
+    activeCaloriesKcal:
+      metrics.distanceMeters > 0 ? nextMetrics.activeCaloriesKcal : 0,
+    lapActiveCaloriesKcal:
+      metrics.lapDistanceMeters > 0 ? nextMetrics.lapActiveCaloriesKcal : 0,
+  };
+}
+
+export function createRideRecordingAccumulator({
+  settings: initialSettings,
+  startedAt,
+}: {
+  settings: RideSettings;
+  startedAt: number;
+}): RideRecordingAccumulator {
+  let settings = initialSettings;
+  let metrics: RideMetrics = {
+    ...initialRideRecordingMetrics,
+    startedAt,
+    lapStartedAt: startedAt,
+  };
+  let routePoints: RidePoint[] = [];
+  let currentCoordinate: RouteCoordinate | null = null;
+  let isAutoPaused = false;
+  let previousPoint: RidePoint | null = null;
+  let manualPausedStartedAt: number | null = null;
+  let autoPausedStartedAt: number | null = null;
+  let pauseIntervals: RidePauseInterval[] = [];
+  let committedPausedSeconds = 0;
+  let committedLapPausedSeconds = 0;
+  let stoppedAt: number | null = null;
+
+  function getTimingNow(now = Date.now()) {
+    return stoppedAt ?? now;
+  }
+
+  function getElapsedSeconds(now = Date.now()) {
+    if (metrics.startedAt == null) {
+      return 0;
+    }
+
+    return secondsBetween(metrics.startedAt, getTimingNow(now));
+  }
+
+  function getLapElapsedSeconds(now = Date.now()) {
+    if (metrics.lapStartedAt == null) {
+      return 0;
+    }
+
+    return secondsBetween(metrics.lapStartedAt, getTimingNow(now));
+  }
+
+  function getLapPauseSeconds(startedAt: number, endedAt: number) {
+    const lapStartedAt = metrics.lapStartedAt;
+    const scopedStartedAt =
+      lapStartedAt == null ? startedAt : Math.max(startedAt, lapStartedAt);
+
+    return secondsBetween(scopedStartedAt, endedAt);
+  }
+
+  function getInProgressPauseSeconds(
+    pausedStartedAt: number | null,
+    now = Date.now(),
+  ) {
+    if (pausedStartedAt == null) {
+      return {
+        pausedSeconds: 0,
+        lapPausedSeconds: 0,
+      };
+    }
+
+    const timingNow = getTimingNow(now);
+
+    return {
+      pausedSeconds: secondsBetween(pausedStartedAt, timingNow),
+      lapPausedSeconds: getLapPauseSeconds(pausedStartedAt, timingNow),
+    };
+  }
+
+  function getTimingMetrics(now = Date.now()): TimingMetrics {
+    const elapsedSeconds = getElapsedSeconds(now);
+    const lapElapsedSeconds = getLapElapsedSeconds(now);
+    const inProgressAutoPauseSeconds = getInProgressPauseSeconds(
+      autoPausedStartedAt,
+      now,
+    );
+    const inProgressManualPauseSeconds = getInProgressPauseSeconds(
+      manualPausedStartedAt,
+      now,
+    );
+    const pausedSeconds = Math.min(
+      elapsedSeconds,
+      committedPausedSeconds +
+        inProgressAutoPauseSeconds.pausedSeconds +
+        inProgressManualPauseSeconds.pausedSeconds,
+    );
+    const lapPausedSeconds = Math.min(
+      lapElapsedSeconds,
+      committedLapPausedSeconds +
+        inProgressAutoPauseSeconds.lapPausedSeconds +
+        inProgressManualPauseSeconds.lapPausedSeconds,
+    );
+
+    return {
+      elapsedSeconds,
+      movingSeconds: Math.max(0, elapsedSeconds - pausedSeconds),
+      pausedSeconds,
+      lapElapsedSeconds,
+      lapPausedSeconds,
+      lapMovingSeconds: Math.max(0, lapElapsedSeconds - lapPausedSeconds),
+    };
+  }
+
+  function applyMetrics(nextMetrics: RideMetrics) {
+    metrics = cloneMetrics(nextMetrics);
+  }
+
+  function refreshTimingState(now = Date.now()) {
+    const timingMetrics = getTimingMetrics(now);
+
+    applyMetrics(
+      withAccumulatorEstimatedCalories(
+        {
+          ...metrics,
+          ...timingMetrics,
+          averageSpeedMps:
+            timingMetrics.movingSeconds > 0
+              ? metrics.distanceMeters / timingMetrics.movingSeconds
+              : 0,
+          lapAverageSpeedMps:
+            timingMetrics.lapMovingSeconds > 0
+              ? metrics.lapDistanceMeters / timingMetrics.lapMovingSeconds
+              : 0,
+        },
+        settings,
+      ),
+    );
+
+    return timingMetrics;
+  }
+
+  function recordPauseInterval(startedAt: number, endedAt: number) {
+    if (endedAt <= startedAt) {
+      return;
+    }
+
+    pauseIntervals = [...pauseIntervals, { startedAt, endedAt }];
+  }
+
+  function commitPauseInterval(startedAt: number, endedAt: number) {
+    const pausedSeconds = secondsBetween(startedAt, endedAt);
+
+    if (pausedSeconds <= 0) {
+      return;
+    }
+
+    committedPausedSeconds += pausedSeconds;
+    committedLapPausedSeconds += getLapPauseSeconds(startedAt, endedAt);
+    recordPauseInterval(startedAt, endedAt);
+  }
+
+  function commitManualPausedTime(now = Date.now()) {
+    if (manualPausedStartedAt == null) {
+      return;
+    }
+
+    const pausedStartedAt = manualPausedStartedAt;
+    manualPausedStartedAt = null;
+    commitPauseInterval(pausedStartedAt, getTimingNow(now));
+  }
+
+  function commitAutoPausedTime(now = Date.now()) {
+    if (autoPausedStartedAt == null) {
+      return;
+    }
+
+    const pausedStartedAt = autoPausedStartedAt;
+    autoPausedStartedAt = null;
+    commitPauseInterval(pausedStartedAt, getTimingNow(now));
+  }
+
+  function openPauseInterval(startedAt: number | null, now = Date.now()) {
+    return startedAt != null && getTimingNow(now) > startedAt
+      ? [{ startedAt, endedAt: getTimingNow(now) }]
+      : [];
+  }
+
+  return {
+    updateSettings(nextSettings) {
+      settings = nextSettings;
+      refreshTimingState();
+    },
+    getMetrics() {
+      return cloneMetrics(metrics);
+    },
+    getRoutePoints() {
+      return [...routePoints];
+    },
+    getCurrentCoordinate() {
+      return currentCoordinate == null ? null : { ...currentCoordinate };
+    },
+    getIsAutoPaused() {
+      return isAutoPaused;
+    },
+    getPauseIntervals(now = Date.now()) {
+      return [
+        ...pauseIntervals,
+        ...openPauseInterval(manualPausedStartedAt, now),
+        ...openPauseInterval(autoPausedStartedAt, now),
+      ];
+    },
+    refreshTiming(now = Date.now()) {
+      refreshTimingState(now);
+
+      return { didAutoLap: false };
+    },
+    beginManualPause(now = Date.now()) {
+      if (manualPausedStartedAt == null) {
+        manualPausedStartedAt = getTimingNow(now);
+      }
+
+      refreshTimingState(now);
+
+      return { didAutoLap: false };
+    },
+    endManualPause(now = Date.now()) {
+      commitManualPausedTime(now);
+      refreshTimingState(now);
+
+      return { didAutoLap: false };
+    },
+    setAutoPaused(nextIsAutoPaused, now = Date.now()) {
+      if (nextIsAutoPaused !== isAutoPaused) {
+        if (nextIsAutoPaused) {
+          autoPausedStartedAt = getTimingNow(now);
+        } else {
+          commitAutoPausedTime(now);
+        }
+
+        isAutoPaused = nextIsAutoPaused;
+      }
+
+      refreshTimingState(now);
+
+      return { didAutoLap: false };
+    },
+    markLap(now = Date.now()) {
+      const timingNow = getTimingNow(now);
+      const timingMetrics = getTimingMetrics(timingNow);
+      committedLapPausedSeconds = 0;
+
+      applyMetrics(
+        withAccumulatorEstimatedCalories(
+          {
+            ...metrics,
+            ...timingMetrics,
+            lapNumber: metrics.lapNumber + 1,
+            lapStartedAt: timingNow,
+            lapElapsedSeconds: 0,
+            lapPausedSeconds: 0,
+            lapMovingSeconds: 0,
+            lapDistanceMeters: 0,
+            lapAscentMeters: 0,
+            lapActiveCaloriesKcal: null,
+            lapAverageSpeedMps: 0,
+            lapMaxSpeedMps: 0,
+          },
+          settings,
+        ),
+      );
+
+      return { didAutoLap: false };
+    },
+    ingestPoint(point, now = Date.now()) {
+      currentCoordinate = toRouteCoordinate(point);
+      routePoints = [...routePoints, point];
+      previousPoint = point;
+      refreshTimingState(now);
+
+      return {
+        didChangeRoutePoints: true,
+        shouldPersistPoint: true,
+        didAutoLap: false,
+      };
+    },
+    replacePointsFromPersistence(points, now = Date.now()) {
+      routePoints = [...points];
+      previousPoint = routePoints.at(-1) ?? null;
+      currentCoordinate = previousPoint
+        ? toRouteCoordinate(previousPoint)
+        : null;
+      refreshTimingState(now);
+
+      return { didAutoLap: false };
+    },
+    finish(now = Date.now()) {
+      const timingNow = getTimingNow(now);
+
+      commitManualPausedTime(timingNow);
+      commitAutoPausedTime(timingNow);
+      stoppedAt = timingNow;
+      refreshTimingState(timingNow);
+
+      return {
+        metrics: cloneMetrics(metrics),
+        routePoints: [...routePoints],
+        pauseIntervals: [...pauseIntervals],
+      };
+    },
+  };
+}
