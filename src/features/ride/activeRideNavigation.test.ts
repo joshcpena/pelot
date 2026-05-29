@@ -5,8 +5,11 @@ import {
   ACTIVE_RIDE_NAVIGATION_OFF_ROUTE_DISTANCE_METERS,
   ACTIVE_RIDE_NAVIGATION_REROUTE_COOLDOWN_MS,
   distanceToRouteMeters,
+  getErrorMessage,
   getRerouteCandidate,
+  initialActiveRideNavigationState,
   type ActiveRideNavigationAdapters,
+  type ActiveRideNavigationControllerInternal,
   type ActiveRideNavigationSnapshot,
 } from './activeRideNavigation';
 import type {
@@ -52,6 +55,15 @@ const snapshotWithoutCurrentCoordinate: ActiveRideNavigationSnapshot = {
 };
 void snapshotWithoutCurrentCoordinate;
 
+const controllerContractCheck: Pick<
+  ActiveRideNavigationControllerInternal,
+  'getState' | 'updateSnapshot'
+> = {
+  getState: () => initialActiveRideNavigationState,
+  updateSnapshot: () => undefined,
+};
+void controllerContractCheck;
+
 describe('distanceToRouteMeters', () => {
   it('returns infinity when no route coordinates exist', () => {
     expect(distanceToRouteMeters(coordinate(38, -77), [])).toBe(
@@ -67,6 +79,15 @@ describe('distanceToRouteMeters', () => {
 
     expect(distance).toBeGreaterThan(100);
     expect(distance).toBeLessThan(120);
+  });
+});
+
+describe('active ride navigation controller helpers', () => {
+  it('exports initial state and error normalization helpers', () => {
+    expect(initialActiveRideNavigationState.destinationInput).toBe('');
+    expect(initialActiveRideNavigationState.plannedRoute).toBeNull();
+    expect(getErrorMessage(new Error('No route'), 'Fallback')).toBe('No route');
+    expect(getErrorMessage('No route', 'Fallback')).toBe('Fallback');
   });
 });
 
@@ -203,11 +224,13 @@ describe('getRerouteCandidate', () => {
 function createAdapters(): {
   adapters: ActiveRideNavigationAdapters;
   calls: {
+    originLookups: RouteCoordinate[];
     savedRecents: DestinationOption[][];
     plannedOrigins: RouteCoordinate[];
   };
 } {
   const calls = {
+    originLookups: [] as RouteCoordinate[],
     savedRecents: [] as DestinationOption[][],
     plannedOrigins: [] as RouteCoordinate[],
   };
@@ -216,7 +239,15 @@ function createAdapters(): {
     calls,
     adapters: {
       origin: {
-        getOrigin: async () => coordinate(38, -77),
+        getOrigin: async () => {
+          if (calls.originLookups.length > 0) {
+            throw new Error('Origin should be reused after search.');
+          }
+
+          const origin = coordinate(38, -77);
+          calls.originLookups.push(origin);
+          return origin;
+        },
       },
       placeSearch: {
         search: async ({ query, origin }) => [
@@ -268,6 +299,9 @@ describe('createActiveRideNavigationController', () => {
       },
     });
 
+    await controller.openPlanner();
+    expect(controller.getState().isPlannerOpen).toBe(true);
+
     controller.setDestinationInput(' Coffee ');
     await controller.searchDestinations();
 
@@ -286,6 +320,7 @@ describe('createActiveRideNavigationController', () => {
     expect(controller.getState().selectedDestination?.name).toBe('Coffee');
     expect(controller.getState().destinationOptions).toEqual([]);
     expect(controller.getState().isPlannerOpen).toBe(false);
+    expect(calls.originLookups).toEqual([coordinate(38, -77)]);
     expect(calls.plannedOrigins).toEqual([coordinate(38, -77)]);
     expect(calls.savedRecents[0][0].name).toBe('Coffee');
   });

@@ -87,12 +87,12 @@ export type ActiveRideNavigationController = ActiveRideNavigationState & {
   maybeReroute: () => Promise<void>;
 };
 
-type ActiveRideNavigationControllerInternal = {
+export type ActiveRideNavigationControllerInternal = {
   getState: () => ActiveRideNavigationState;
   updateSnapshot: (snapshot: ActiveRideNavigationSnapshot) => void;
 } & Omit<ActiveRideNavigationController, keyof ActiveRideNavigationState>;
 
-const initialActiveRideNavigationState: ActiveRideNavigationState = {
+export const initialActiveRideNavigationState: ActiveRideNavigationState = {
   destinationInput: '',
   destinationOptions: [],
   recentDestinations: [],
@@ -104,7 +104,7 @@ const initialActiveRideNavigationState: ActiveRideNavigationState = {
   isPlanningRoute: false,
 };
 
-function getErrorMessage(error: unknown, fallback: string) {
+export function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
