@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import * as Brightness from 'expo-brightness';
@@ -46,13 +46,9 @@ import {
 import { DashboardGrid } from '../src/features/ride/DashboardGrid';
 import { RideMap } from '../src/features/ride/RideMap';
 import { RideScreenBrightnessController } from '../src/features/ride/screenBrightness';
-import {
-  getUpdatedRecentRouteDestinations,
-  loadRecentRouteDestinations,
-  planBikeRoute,
-  saveRecentRouteDestinations,
-  searchBikeDestinations,
-} from '../src/features/ride/routePlanning';
+import { createActiveRideNavigationAdapters } from '../src/features/ride/activeRideNavigationAdapters';
+import { createExpoRouteOriginAdapter } from '../src/features/ride/activeRideNavigationOrigin';
+import { useActiveRideNavigation } from '../src/features/ride/activeRideNavigation';
 import {
   deleteRide,
   updateRideDetails,
@@ -118,8 +114,6 @@ const navigationItems = [
   },
 ] as const;
 
-const OFF_ROUTE_DISTANCE_METERS = 75;
-const REROUTE_COOLDOWN_MS = 30_000;
 const AUTO_DIM_DELAY_MS = 30_000;
 const STOP_HOLD_MS = 1000;
 const DASHBOARD_SWIPE_START_PX = 24;
@@ -157,77 +151,6 @@ type DashboardMapRect = {
   width: number;
   height: number;
 };
-
-function distanceBetweenCoordinates(a: RouteCoordinate, b: RouteCoordinate) {
-  const earthRadiusMeters = 6_371_000;
-  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
-  const deltaLatitude = toRadians(b.latitude - a.latitude);
-  const deltaLongitude = toRadians(b.longitude - a.longitude);
-  const latitudeA = toRadians(a.latitude);
-  const latitudeB = toRadians(b.latitude);
-  const haversine =
-    Math.sin(deltaLatitude / 2) ** 2 +
-    Math.cos(latitudeA) *
-      Math.cos(latitudeB) *
-      Math.sin(deltaLongitude / 2) ** 2;
-
-  return (
-    earthRadiusMeters *
-    2 *
-    Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine))
-  );
-}
-
-function distanceToRouteMeters(
-  coordinate: RouteCoordinate,
-  routeCoordinates: RouteCoordinate[],
-) {
-  if (routeCoordinates.length === 0) {
-    return Number.POSITIVE_INFINITY;
-  }
-
-  if (routeCoordinates.length === 1) {
-    return distanceBetweenCoordinates(coordinate, routeCoordinates[0]);
-  }
-
-  const metersPerDegreeLatitude = 111_320;
-  const metersPerDegreeLongitude =
-    metersPerDegreeLatitude * Math.cos((coordinate.latitude * Math.PI) / 180);
-
-  let bestDistance = Number.POSITIVE_INFINITY;
-
-  for (let index = 0; index < routeCoordinates.length - 1; index += 1) {
-    const start = routeCoordinates[index];
-    const end = routeCoordinates[index + 1];
-    const startX =
-      (start.longitude - coordinate.longitude) * metersPerDegreeLongitude;
-    const startY =
-      (start.latitude - coordinate.latitude) * metersPerDegreeLatitude;
-    const endX =
-      (end.longitude - coordinate.longitude) * metersPerDegreeLongitude;
-    const endY = (end.latitude - coordinate.latitude) * metersPerDegreeLatitude;
-    const segmentX = endX - startX;
-    const segmentY = endY - startY;
-    const segmentLengthSquared = segmentX ** 2 + segmentY ** 2;
-    const projection =
-      segmentLengthSquared === 0
-        ? 0
-        : Math.max(
-            0,
-            Math.min(
-              1,
-              -(startX * segmentX + startY * segmentY) / segmentLengthSquared,
-            ),
-          );
-    const closestX = startX + segmentX * projection;
-    const closestY = startY + segmentY * projection;
-    const distance = Math.hypot(closestX, closestY);
-
-    bestDistance = Math.min(bestDistance, distance);
-  }
-
-  return bestDistance;
-}
 
 function clampDashboardScreenIndex(index: number, screenCount: number) {
   return Math.min(Math.max(index, 0), Math.max(screenCount - 1, 0));
@@ -326,38 +249,50 @@ export default function HomeScreen() {
   const dashboardPageWidth = Math.max(windowWidth, 1);
   const routePlannerMaxHeight = Math.max(windowHeight * 0.8, 1);
   const recorder = useForegroundRideRecorder(settings);
-  const lastRouteOriginRef = useRef<RouteCoordinate | null>(null);
-  const rerouteInFlightRef = useRef(false);
-  const lastRerouteAtRef = useRef(0);
+  const activeRideNavigationOriginRef =
+    useRef<ReturnType<typeof createExpoRouteOriginAdapter> | null>(null);
+
+  if (!activeRideNavigationOriginRef.current) {
+    activeRideNavigationOriginRef.current = createExpoRouteOriginAdapter();
+  }
+
+  const activeRideNavigationAdapters = useMemo(
+    () =>
+      createActiveRideNavigationAdapters({
+        origin: activeRideNavigationOriginRef.current!,
+      }),
+    [],
+  );
+  const activeRideNavigation = useActiveRideNavigation({
+    adapters: activeRideNavigationAdapters,
+    rideStatus: recorder.status,
+    routePoints: recorder.routePoints,
+    currentCoordinate: recorder.currentCoordinate,
+    routeProfile: settings.routeProfile,
+  });
+  const {
+    destinationInput,
+    destinationOptions,
+    recentDestinations,
+    plannedRoute,
+    isPlannerOpen: isRoutePlannerOpen,
+    routePlanError,
+    isSearchingDestinations,
+    isPlanningRoute,
+  } = activeRideNavigation;
   const autoDimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldAutoDimRideScreenRef = useRef(false);
   const stopHoldCompletedRef = useRef(false);
   const destinationInputRef = useRef<TextInput | null>(null);
   const heartRateSamplesRef = useRef<HeartRateSample[]>([]);
   const lastHeartRateSampleRef = useRef<HeartRateSample | null>(null);
-  const [isRoutePlannerOpen, setIsRoutePlannerOpen] = useState(false);
   const [isNavigationOpen, setIsNavigationOpen] = useState(false);
-  const [destinationInput, setDestinationInput] = useState('');
-  const [destinationOptions, setDestinationOptions] = useState<
-    DestinationOption[]
-  >([]);
-  const [recentRouteDestinations, setRecentRouteDestinations] = useState<
-    DestinationOption[]
-  >([]);
-  const [routeSearchOrigin, setRouteSearchOrigin] =
-    useState<RouteCoordinate | null>(null);
-  const [plannedRoute, setPlannedRoute] = useState<PlannedRoute | null>(null);
-  const [selectedDestination, setSelectedDestination] =
-    useState<DestinationOption | null>(null);
-  const [isSearchingDestinations, setIsSearchingDestinations] = useState(false);
-  const [isPlanningRoute, setIsPlanningRoute] = useState(false);
   const [isScreenDimmed, setIsScreenDimmed] = useState(false);
   const rideScreenBrightnessRef = useRef<RideScreenBrightnessController | null>(
     null,
   );
   const [routePlannerKeyboardHeight, setRoutePlannerKeyboardHeight] =
     useState(0);
-  const [routePlanError, setRoutePlanError] = useState<string | null>(null);
   const [finishedRide, setFinishedRide] = useState<FinishedRideSummary | null>(
     null,
   );
@@ -518,7 +453,7 @@ export default function HomeScreen() {
       : null;
   const visibleRecentRouteDestinations =
     destinationOptions.length === 0 && !isSearchingDestinations
-      ? recentRouteDestinations
+      ? recentDestinations
       : [];
   const hasRoutePlannerOptionList =
     visibleRecentRouteDestinations.length > 0 || destinationOptions.length > 0;
@@ -777,92 +712,13 @@ export default function HomeScreen() {
   }, [isRoutePlannerOpen]);
 
   useEffect(() => {
-    if (!isRoutePlannerOpen) {
-      return;
-    }
-
-    let isMounted = true;
-
-    loadRecentRouteDestinations()
-      .then((destinations) => {
-        if (isMounted) {
-          setRecentRouteDestinations(destinations);
-        }
-      })
-      .catch(() => undefined);
-
-    return () => {
-      isMounted = false;
-    };
-  }, [isRoutePlannerOpen]);
-
-  useEffect(() => {
-    if (
-      recorder.status !== 'recording' ||
-      !plannedRoute ||
-      !selectedDestination
-    ) {
-      return;
-    }
-
-    const latestPoint = recorder.routePoints.at(-1);
-    const currentCoordinate =
-      recorder.currentCoordinate ??
-      (latestPoint
-        ? {
-            latitude: latestPoint.latitude,
-            longitude: latestPoint.longitude,
-          }
-        : null);
-
-    if (!currentCoordinate || plannedRoute.coordinates.length < 2) {
-      return;
-    }
-
-    const distanceFromRoute = distanceToRouteMeters(
-      currentCoordinate,
-      plannedRoute.coordinates,
-    );
-
-    if (distanceFromRoute < OFF_ROUTE_DISTANCE_METERS) {
-      return;
-    }
-
-    const nowMs = Date.now();
-
-    if (
-      rerouteInFlightRef.current ||
-      nowMs - lastRerouteAtRef.current < REROUTE_COOLDOWN_MS
-    ) {
-      return;
-    }
-
-    rerouteInFlightRef.current = true;
-    lastRerouteAtRef.current = nowMs;
-
-    planBikeRoute({
-      destination: selectedDestination,
-      origin: currentCoordinate,
-      routeProfile: settings.routeProfile,
-    })
-      .then((route) => {
-        setPlannedRoute(route);
-        setRoutePlanError(null);
-      })
-      .catch((error) => {
-        setRoutePlanError(
-          error instanceof Error ? error.message : 'Could not reroute.',
-        );
-      })
-      .finally(() => {
-        rerouteInFlightRef.current = false;
-      });
+    activeRideNavigation.maybeReroute().catch(() => undefined);
   }, [
+    activeRideNavigation.maybeReroute,
     plannedRoute,
     recorder.currentCoordinate,
     recorder.routePoints,
     recorder.status,
-    selectedDestination,
     settings.routeProfile,
   ]);
 
@@ -1151,158 +1007,33 @@ export default function HomeScreen() {
     updateSetting('hasCompletedWelcome', true).catch(() => {});
   }
 
-  async function getRouteOrigin() {
-    const permission = await Location.requestForegroundPermissionsAsync();
-
-    if (permission.status !== Location.PermissionStatus.GRANTED) {
-      throw new Error('Location permission is required to plan a route.');
-    }
-
-    const shouldUseLastRidePoint =
-      recorder.status === 'recording' || recorder.status === 'paused';
-    const lastRidePoint = shouldUseLastRidePoint
-      ? recorder.routePoints.at(-1)
-      : null;
-
-    if (shouldUseLastRidePoint && recorder.currentCoordinate) {
-      lastRouteOriginRef.current = recorder.currentCoordinate;
-      return recorder.currentCoordinate;
-    }
-
-    if (lastRidePoint) {
-      const origin = {
-        latitude: lastRidePoint.latitude,
-        longitude: lastRidePoint.longitude,
-      };
-      lastRouteOriginRef.current = origin;
-      return origin;
-    }
-
-    const lastKnownPosition = await Location.getLastKnownPositionAsync({
-      maxAge: 5 * 60 * 1000,
-      requiredAccuracy: 2000,
-    });
-
-    if (lastKnownPosition) {
-      const origin = {
-        latitude: lastKnownPosition.coords.latitude,
-        longitude: lastKnownPosition.coords.longitude,
-      };
-      lastRouteOriginRef.current = origin;
-      return origin;
-    }
-
-    if (lastRouteOriginRef.current) {
-      return lastRouteOriginRef.current;
-    }
-
-    const position = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.High,
-    });
-
-    const origin = {
-      latitude: position.coords.latitude,
-      longitude: position.coords.longitude,
-    };
-    lastRouteOriginRef.current = origin;
-    return origin;
-  }
-
-  async function handleSearchDestinations() {
-    const query = destinationInput.trim();
-
-    if (!query) {
-      setRoutePlanError('Enter a destination first.');
-      return;
-    }
-
-    Keyboard.dismiss();
-    setRoutePlanError(null);
-    setIsSearchingDestinations(true);
-    setPlannedRoute(null);
-    setSelectedDestination(null);
-
-    try {
-      const origin = await getRouteOrigin();
-      const options = await searchBikeDestinations({
-        query,
-        origin,
-      });
-
-      setRouteSearchOrigin(origin);
-      setDestinationOptions(options);
-    } catch (error) {
-      setRoutePlanError(
-        error instanceof Error
-          ? error.message
-          : 'Could not search destinations.',
-      );
-    } finally {
-      setIsSearchingDestinations(false);
-    }
-  }
-
   function clearDestinationInput() {
-    setDestinationInput('');
-    setDestinationOptions([]);
-    setRouteSearchOrigin(null);
-    setRoutePlanError(null);
+    activeRideNavigation.clearDestinationInput();
     destinationInputRef.current?.focus();
-  }
-
-  async function handleSelectDestination(destination: DestinationOption) {
-    Keyboard.dismiss();
-    setDestinationInput(destination.name);
-    setRoutePlanError(null);
-    setIsPlanningRoute(true);
-
-    try {
-      const origin = routeSearchOrigin ?? (await getRouteOrigin());
-      const route = await planBikeRoute({
-        destination,
-        origin,
-        routeProfile: settings.routeProfile,
-      });
-
-      setPlannedRoute(route);
-      setSelectedDestination(destination);
-      setDestinationOptions([]);
-      setRouteSearchOrigin(null);
-      rememberRecentRouteDestination(destination);
-      closeRoutePlanner();
-    } catch (error) {
-      setRoutePlanError(
-        error instanceof Error ? error.message : 'Could not plan bike route.',
-      );
-    } finally {
-      setIsPlanningRoute(false);
-    }
   }
 
   function closeRoutePlanner() {
     Keyboard.dismiss();
     setRoutePlannerKeyboardHeight(0);
-    setIsRoutePlannerOpen(false);
+    activeRideNavigation.closePlanner();
   }
 
-  function rememberRecentRouteDestination(destination: DestinationOption) {
-    setRecentRouteDestinations((currentDestinations) => {
-      const updatedDestinations = getUpdatedRecentRouteDestinations(
-        destination,
-        currentDestinations,
-      );
+  function openRoutePlanner() {
+    activeRideNavigation.openPlanner().catch(() => undefined);
+  }
 
-      saveRecentRouteDestinations(updatedDestinations).catch(() => undefined);
-      return updatedDestinations;
-    });
+  function handleSearchDestinations() {
+    Keyboard.dismiss();
+    activeRideNavigation.searchDestinations().catch(() => undefined);
+  }
+
+  function handleSelectDestination(destination: DestinationOption) {
+    Keyboard.dismiss();
+    activeRideNavigation.selectDestination(destination).catch(() => undefined);
   }
 
   function cancelNavigation() {
-    setPlannedRoute(null);
-    setSelectedDestination(null);
-    setRouteSearchOrigin(null);
-    setDestinationOptions([]);
-    setRoutePlanError(null);
+    activeRideNavigation.cancelNavigation();
   }
 
   function startStopHold() {
@@ -1413,11 +1144,7 @@ export default function HomeScreen() {
             ref={destinationInputRef}
             autoCapitalize="words"
             autoCorrect={false}
-            onChangeText={(value) => {
-              setDestinationInput(value);
-              setDestinationOptions([]);
-              setRoutePlanError(null);
-            }}
+            onChangeText={activeRideNavigation.setDestinationInput}
             editable={!isSearchingDestinations && !isPlanningRoute}
             onSubmitEditing={handleSearchDestinations}
             placeholder="e.g. Gravelly Point"
@@ -2014,7 +1741,7 @@ export default function HomeScreen() {
                   styles.routeButton,
                   pressed && styles.routeButtonPressed,
                 ]}
-                onPress={() => setIsRoutePlannerOpen(true)}
+                onPress={openRoutePlanner}
               >
                 {({ pressed }) => (
                   <Text
