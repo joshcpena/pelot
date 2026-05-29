@@ -45,6 +45,7 @@ import {
 } from '../src/features/ride/dashboard';
 import { DashboardGrid } from '../src/features/ride/DashboardGrid';
 import { RideMap } from '../src/features/ride/RideMap';
+import { RideScreenBrightnessController } from '../src/features/ride/screenBrightness';
 import {
   getUpdatedRecentRouteDestinations,
   loadRecentRouteDestinations,
@@ -74,6 +75,7 @@ import type {
   RouteCoordinate,
 } from '../src/features/ride/types';
 import { useForegroundRideRecorder } from '../src/features/ride/useForegroundRideRecorder';
+import { areWelcomePermissionsGranted } from '../src/features/ride/welcomePermissions';
 import {
   requestHeartRateBluetoothAccess,
   useHeartRateMonitor,
@@ -119,7 +121,6 @@ const navigationItems = [
 const OFF_ROUTE_DISTANCE_METERS = 75;
 const REROUTE_COOLDOWN_MS = 30_000;
 const AUTO_DIM_DELAY_MS = 30_000;
-const AUTO_DIM_BRIGHTNESS = 0.08;
 const STOP_HOLD_MS = 1000;
 const DASHBOARD_SWIPE_START_PX = 24;
 const DASHBOARD_SWIPE_RELEASE_PX = 58;
@@ -329,7 +330,6 @@ export default function HomeScreen() {
   const rerouteInFlightRef = useRef(false);
   const lastRerouteAtRef = useRef(0);
   const autoDimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const brightnessBeforeDimRef = useRef<number | null>(null);
   const shouldAutoDimRideScreenRef = useRef(false);
   const stopHoldCompletedRef = useRef(false);
   const destinationInputRef = useRef<TextInput | null>(null);
@@ -352,6 +352,9 @@ export default function HomeScreen() {
   const [isSearchingDestinations, setIsSearchingDestinations] = useState(false);
   const [isPlanningRoute, setIsPlanningRoute] = useState(false);
   const [isScreenDimmed, setIsScreenDimmed] = useState(false);
+  const rideScreenBrightnessRef = useRef<RideScreenBrightnessController | null>(
+    null,
+  );
   const [routePlannerKeyboardHeight, setRoutePlannerKeyboardHeight] =
     useState(0);
   const [routePlanError, setRoutePlanError] = useState<string | null>(null);
@@ -385,6 +388,8 @@ export default function HomeScreen() {
   const [welcomePermissionMessage, setWelcomePermissionMessage] = useState<
     string | null
   >(null);
+  const [hasGrantedWelcomePermissions, setHasGrantedWelcomePermissions] =
+    useState(false);
   const [metricPickerCardId, setMetricPickerCardId] = useState<string | null>(
     null,
   );
@@ -395,6 +400,8 @@ export default function HomeScreen() {
   const dashboardWidthRef = useRef(dashboardPageWidth);
   const isEditingDashboardRef = useRef(false);
   const visibleDashboardScreenIndexRef = useRef(0);
+  const isWelcomeAccessButtonDisabled =
+    isPromptingWelcomePermissions || hasGrantedWelcomePermissions;
   const isRecording = recorder.status === 'recording';
   const isPaused = recorder.status === 'paused';
   const shouldApplyRideScreenControls =
@@ -516,6 +523,15 @@ export default function HomeScreen() {
   const hasRoutePlannerOptionList =
     visibleRecentRouteDestinations.length > 0 || destinationOptions.length > 0;
   shouldAutoDimRideScreenRef.current = shouldAutoDimRideScreen;
+  if (!rideScreenBrightnessRef.current) {
+    rideScreenBrightnessRef.current = new RideScreenBrightnessController({
+      brightness: Brightness,
+      isAutoDimEnabled: () => shouldAutoDimRideScreenRef.current,
+      onDimmedChange: setIsScreenDimmed,
+      platformOS: Platform.OS,
+    });
+  }
+  const rideScreenBrightness = rideScreenBrightnessRef.current;
   const [dashboardSwipeResponder] = useState(() =>
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, gesture) =>
@@ -596,35 +612,6 @@ export default function HomeScreen() {
     }
   }
 
-  async function dimScreenForRide() {
-    if (!shouldAutoDimRideScreenRef.current) {
-      return;
-    }
-
-    let brightnessBeforeDim = brightnessBeforeDimRef.current;
-
-    if (brightnessBeforeDim == null) {
-      brightnessBeforeDim = await Brightness.getBrightnessAsync();
-
-      if (!shouldAutoDimRideScreenRef.current) {
-        return;
-      }
-
-      brightnessBeforeDimRef.current = brightnessBeforeDim;
-    }
-
-    await Brightness.setBrightnessAsync(AUTO_DIM_BRIGHTNESS);
-
-    if (!shouldAutoDimRideScreenRef.current) {
-      await Brightness.setBrightnessAsync(brightnessBeforeDim);
-      brightnessBeforeDimRef.current = null;
-      setIsScreenDimmed(false);
-      return;
-    }
-
-    setIsScreenDimmed(true);
-  }
-
   function scheduleAutoDim() {
     clearAutoDimTimer();
 
@@ -633,19 +620,13 @@ export default function HomeScreen() {
     }
 
     autoDimTimerRef.current = setTimeout(() => {
-      dimScreenForRide().catch(() => undefined);
+      rideScreenBrightness.dim().catch(() => undefined);
     }, AUTO_DIM_DELAY_MS);
   }
 
   async function restoreScreenBrightness() {
     clearAutoDimTimer();
-
-    if (brightnessBeforeDimRef.current != null) {
-      await Brightness.setBrightnessAsync(brightnessBeforeDimRef.current);
-      brightnessBeforeDimRef.current = null;
-    }
-
-    setIsScreenDimmed(false);
+    await rideScreenBrightness.restore();
     scheduleAutoDim();
   }
 
@@ -756,39 +737,24 @@ export default function HomeScreen() {
     clearAutoDimTimer();
 
     if (!shouldAutoDimRideScreen) {
-      const brightnessBeforeDim = brightnessBeforeDimRef.current;
-
-      if (brightnessBeforeDim != null) {
-        Brightness.setBrightnessAsync(brightnessBeforeDim)
-          .then(() => {
-            brightnessBeforeDimRef.current = null;
-            setIsScreenDimmed(false);
-          })
-          .catch(() => undefined);
-      } else {
-        setIsScreenDimmed(false);
-      }
+      rideScreenBrightness.restore().catch(() => undefined);
 
       return () => clearAutoDimTimer();
     }
 
     autoDimTimerRef.current = setTimeout(() => {
-      dimScreenForRide().catch(() => undefined);
+      rideScreenBrightness.dim().catch(() => undefined);
     }, AUTO_DIM_DELAY_MS);
 
     return () => clearAutoDimTimer();
-  }, [shouldAutoDimRideScreen]);
+  }, [rideScreenBrightness, shouldAutoDimRideScreen]);
 
   useEffect(() => {
     return () => {
       clearAutoDimTimer();
-      if (brightnessBeforeDimRef.current != null) {
-        Brightness.setBrightnessAsync(brightnessBeforeDimRef.current).catch(
-          () => undefined,
-        );
-      }
+      rideScreenBrightness.dispose().catch(() => undefined);
     };
-  }, []);
+  }, [rideScreenBrightness]);
 
   useEffect(() => {
     if (!isRoutePlannerOpen) {
@@ -1128,6 +1094,7 @@ export default function HomeScreen() {
 
   async function promptForWelcomePermissions() {
     setWelcomePermissionMessage(null);
+    setHasGrantedWelcomePermissions(false);
     setIsPromptingWelcomePermissions(true);
 
     try {
@@ -1137,7 +1104,14 @@ export default function HomeScreen() {
           ? await Location.requestBackgroundPermissionsAsync()
           : null;
       const bluetooth = await requestHeartRateBluetoothAccess();
+      const hasWelcomePermissions = areWelcomePermissionsGranted({
+        foregroundStatus: foreground.status,
+        backgroundStatus: background?.status,
+        bluetoothStatus: bluetooth,
+      });
       const messages: string[] = [];
+
+      setHasGrantedWelcomePermissions(hasWelcomePermissions);
 
       if (foreground.status !== Location.PermissionStatus.GRANTED) {
         messages.push(
@@ -1164,6 +1138,7 @@ export default function HomeScreen() {
           : 'Permissions are ready. You can track rides and connect fitness devices.',
       );
     } catch {
+      setHasGrantedWelcomePermissions(false);
       setWelcomePermissionMessage(
         'Could not finish permission setup. You can try again from Permissions.',
       );
@@ -2258,22 +2233,24 @@ export default function HomeScreen() {
                   <Pressable
                     accessibilityRole="button"
                     accessibilityState={{
-                      disabled: isPromptingWelcomePermissions,
+                      disabled: isWelcomeAccessButtonDisabled,
                     }}
-                    disabled={isPromptingWelcomePermissions}
+                    disabled={isWelcomeAccessButtonDisabled}
                     style={({ pressed }) => [
                       styles.primaryButton,
                       pressed &&
-                        !isPromptingWelcomePermissions &&
+                        !isWelcomeAccessButtonDisabled &&
                         styles.primaryButtonPressed,
-                      isPromptingWelcomePermissions && styles.disabledButton,
+                      isWelcomeAccessButtonDisabled && styles.disabledButton,
                     ]}
                     onPress={promptForWelcomePermissions}
                   >
                     <Text style={styles.primaryButtonText}>
                       {isPromptingWelcomePermissions
                         ? 'Requesting...'
-                        : 'Allow access'}
+                        : hasGrantedWelcomePermissions
+                          ? 'Access allowed'
+                          : 'Allow access'}
                     </Text>
                   </Pressable>
                   <Pressable
