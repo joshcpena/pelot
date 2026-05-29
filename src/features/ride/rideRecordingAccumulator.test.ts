@@ -454,4 +454,155 @@ describe('ride point ingestion', () => {
       lapMaxSpeedMps: 0,
     });
   });
+
+  it('does not bridge distance across a manual pause resume', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({ autoPause: false }),
+      startedAt: BASE_TIME,
+    });
+
+    accumulator.ingestPoint(pointAtMeters(0, 0), BASE_TIME);
+    accumulator.beginManualPause(BASE_TIME + 5_000);
+    accumulator.endManualPause(BASE_TIME + 20_000);
+    accumulator.ingestPoint(pointAtMeters(30, 300), BASE_TIME + 30_000);
+
+    expect(accumulator.getMetrics().distanceMeters).toBe(0);
+    expect(accumulator.getMetrics().lapDistanceMeters).toBe(0);
+
+    accumulator.ingestPoint(pointAtMeters(40, 400), BASE_TIME + 40_000);
+
+    expect(accumulator.getMetrics().distanceMeters).toBeCloseTo(100, 6);
+    expect(accumulator.getMetrics().lapDistanceMeters).toBeCloseTo(100, 6);
+  });
+
+  it('resets route metrics when replay replaces movement with one point', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({ autoPause: false }),
+      startedAt: BASE_TIME,
+    });
+
+    accumulator.ingestPoint(pointAtMeters(0, 0), BASE_TIME);
+    accumulator.ingestPoint(
+      pointAtMeters(10, 100, { altitude: 10 }),
+      BASE_TIME + 10_000,
+    );
+    accumulator.ingestPoint(
+      pointAtMeters(20, 200, { altitude: 14 }),
+      BASE_TIME + 20_000,
+    );
+
+    accumulator.replacePointsFromPersistence(
+      [pointAtMeters(30, 300, { altitude: 20, speedMps: 7 })],
+      BASE_TIME + 40_000,
+    );
+
+    expect(accumulator.getRoutePoints()).toHaveLength(1);
+    expect(accumulator.getCurrentCoordinate()).toEqual({
+      latitude: 0,
+      longitude: (300 / EARTH_RADIUS_METERS) * (180 / Math.PI),
+    });
+    expect(accumulator.getMetrics()).toMatchObject({
+      elapsedSeconds: 40,
+      movingSeconds: 40,
+      distanceMeters: 0,
+      ascentMeters: 0,
+      currentSpeedMps: 7,
+      averageSpeedMps: 0,
+      maxSpeedMps: 0,
+      lapDistanceMeters: 0,
+      lapAscentMeters: 0,
+      lapAverageSpeedMps: 0,
+      lapMaxSpeedMps: 0,
+    });
+  });
+
+  it('replays metrics when inserting a non-chronological point', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({ autoPause: false }),
+      startedAt: BASE_TIME,
+    });
+
+    accumulator.ingestPoint(pointAtMeters(0, 0, { altitude: 0 }), BASE_TIME);
+    accumulator.ingestPoint(
+      pointAtMeters(20, 200, { altitude: 0 }),
+      BASE_TIME + 20_000,
+    );
+
+    expect(
+      accumulator.ingestPoint(
+        pointAtMeters(10, 250, { altitude: 10 }),
+        BASE_TIME + 30_000,
+      ),
+    ).toEqual({
+      didChangeRoutePoints: true,
+      shouldPersistPoint: true,
+      didAutoLap: false,
+    });
+
+    expect(
+      accumulator.getRoutePoints().map((routePoint) => routePoint.recordedAt),
+    ).toEqual([BASE_TIME, BASE_TIME + 10_000, BASE_TIME + 20_000]);
+    expect(accumulator.getMetrics().distanceMeters).toBeCloseTo(300, 6);
+    expect(accumulator.getMetrics().ascentMeters).toBe(10);
+  });
+
+  it('ignores exact duplicate points without persistence', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({ autoPause: false }),
+      startedAt: BASE_TIME,
+    });
+    const firstPoint = pointAtMeters(0, 0);
+
+    accumulator.ingestPoint(firstPoint, BASE_TIME);
+
+    expect(accumulator.ingestPoint(firstPoint, BASE_TIME + 1_000)).toEqual({
+      didChangeRoutePoints: false,
+      shouldPersistPoint: false,
+      didAutoLap: false,
+    });
+    expect(accumulator.getRoutePoints()).toHaveLength(1);
+  });
+
+  it('keeps live timing when replay point span is shorter than now', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({ autoPause: false }),
+      startedAt: BASE_TIME,
+    });
+
+    accumulator.replacePointsFromPersistence(
+      [pointAtMeters(0, 0), pointAtMeters(10, 100)],
+      BASE_TIME + 60_000,
+    );
+
+    expect(accumulator.getMetrics()).toMatchObject({
+      elapsedSeconds: 60,
+      movingSeconds: 60,
+      lapElapsedSeconds: 60,
+      lapMovingSeconds: 60,
+    });
+  });
+
+  it('does not auto-lap while replaying persisted points', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({
+        autoPause: false,
+        autoLap: true,
+        splitType: 'distance',
+        splitDistanceMeters: 100,
+      }),
+      startedAt: BASE_TIME,
+    });
+
+    expect(
+      accumulator.replacePointsFromPersistence(
+        [pointAtMeters(0, 0), pointAtMeters(10, 110)],
+        BASE_TIME + 10_000,
+      ),
+    ).toEqual({ didAutoLap: false });
+
+    expect(accumulator.getMetrics()).toMatchObject({
+      lapNumber: 1,
+    });
+    expect(accumulator.getMetrics().lapDistanceMeters).toBeCloseTo(110, 6);
+  });
 });

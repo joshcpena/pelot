@@ -320,12 +320,15 @@ export function createRideRecordingAccumulator({
 
   function commitManualPausedTime(now = Date.now()) {
     if (manualPausedStartedAt == null) {
-      return;
+      return false;
     }
 
     const pausedStartedAt = manualPausedStartedAt;
     manualPausedStartedAt = null;
-    commitPauseInterval(pausedStartedAt, getTimingNow(now));
+    const pausedEndedAt = getTimingNow(now);
+    commitPauseInterval(pausedStartedAt, pausedEndedAt);
+
+    return pausedEndedAt > pausedStartedAt;
   }
 
   function commitAutoPausedTime(now = Date.now()) {
@@ -415,7 +418,26 @@ export function createRideRecordingAccumulator({
     currentCoordinate = previousPoint ? toRouteCoordinate(previousPoint) : null;
 
     if (routePoints.length <= 1) {
-      refreshTimingState(now);
+      const timingMetrics = getTimingMetrics(now);
+
+      applyMetrics(
+        withAccumulatorEstimatedCalories(
+          {
+            ...metrics,
+            ...timingMetrics,
+            distanceMeters: 0,
+            ascentMeters: 0,
+            currentSpeedMps: previousPoint?.speedMps ?? 0,
+            averageSpeedMps: 0,
+            maxSpeedMps: 0,
+            lapDistanceMeters: 0,
+            lapAscentMeters: 0,
+            lapAverageSpeedMps: 0,
+            lapMaxSpeedMps: 0,
+          },
+          settings,
+        ),
+      );
 
       return { didAutoLap: false };
     }
@@ -505,7 +527,12 @@ export function createRideRecordingAccumulator({
       return { didAutoLap: false };
     },
     endManualPause(now = Date.now()) {
-      commitManualPausedTime(now);
+      const didCloseManualPause = commitManualPausedTime(now);
+
+      if (didCloseManualPause) {
+        previousPoint = null;
+      }
+
       refreshTimingState(now);
 
       return { didAutoLap: false };
