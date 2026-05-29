@@ -174,6 +174,7 @@ export function createRideRecordingAccumulator({
   let committedPausedSeconds = 0;
   let committedLapPausedSeconds = 0;
   let stoppedAt: number | null = null;
+  let hasPendingManualPauseBaselineReset = false;
 
   function getTimingNow(now = Date.now()) {
     return stoppedAt ?? now;
@@ -414,8 +415,12 @@ export function createRideRecordingAccumulator({
     now = Date.now(),
   ) {
     routePoints = [...points];
-    previousPoint = routePoints.at(-1) ?? null;
-    currentCoordinate = previousPoint ? toRouteCoordinate(previousPoint) : null;
+    const latestRoutePoint = routePoints.at(-1) ?? null;
+    previousPoint = hasPendingManualPauseBaselineReset
+      ? null
+      : latestRoutePoint;
+    currentCoordinate =
+      latestRoutePoint == null ? null : toRouteCoordinate(latestRoutePoint);
 
     if (routePoints.length <= 1) {
       const timingMetrics = getTimingMetrics(now);
@@ -427,7 +432,7 @@ export function createRideRecordingAccumulator({
             ...timingMetrics,
             distanceMeters: 0,
             ascentMeters: 0,
-            currentSpeedMps: previousPoint?.speedMps ?? 0,
+            currentSpeedMps: latestRoutePoint?.speedMps ?? 0,
             averageSpeedMps: 0,
             maxSpeedMps: 0,
             lapDistanceMeters: 0,
@@ -530,6 +535,7 @@ export function createRideRecordingAccumulator({
       const didCloseManualPause = commitManualPausedTime(now);
 
       if (didCloseManualPause) {
+        hasPendingManualPauseBaselineReset = true;
         previousPoint = null;
       }
 
@@ -593,10 +599,7 @@ export function createRideRecordingAccumulator({
         settings.autoPause &&
         currentSpeedMps < RIDE_RECORDING_STOPPED_SPEED_MPS;
       const autoPauseTransitionNow =
-        nextAutoPaused &&
-        !wasAutoPaused &&
-        previous != null &&
-        now === point.recordedAt
+        nextAutoPaused && !wasAutoPaused && previous != null
           ? previous.recordedAt
           : now;
 
@@ -634,6 +637,7 @@ export function createRideRecordingAccumulator({
 
       routePoints = [...routePoints, point];
       previousPoint = point;
+      hasPendingManualPauseBaselineReset = false;
       applyMetrics(
         withAccumulatorEstimatedCalories(
           {
