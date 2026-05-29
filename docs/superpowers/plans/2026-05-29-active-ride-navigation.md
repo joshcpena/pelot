@@ -26,6 +26,7 @@
 ### Task 1: Active Ride Navigation Core Geometry
 
 **Files:**
+
 - Create: `src/features/ride/activeRideNavigation.ts`
 - Create: `src/features/ride/activeRideNavigation.test.ts`
 
@@ -44,10 +45,7 @@ import {
 } from './activeRideNavigation';
 import type { PlannedRoute, RidePoint, RouteCoordinate } from './types';
 
-function coordinate(
-  latitude: number,
-  longitude: number,
-): RouteCoordinate {
+function coordinate(latitude: number, longitude: number): RouteCoordinate {
   return { latitude, longitude };
 }
 
@@ -65,9 +63,7 @@ function point(overrides: Partial<RidePoint> = {}): RidePoint {
   };
 }
 
-function plannedRoute(
-  coordinates: RouteCoordinate[],
-): PlannedRoute {
+function plannedRoute(coordinates: RouteCoordinate[]): PlannedRoute {
   return {
     destination: 'Coffee',
     distanceText: '1.0 mi',
@@ -172,9 +168,7 @@ describe('getRerouteCandidate', () => {
 
     expect(
       getRerouteCandidate({
-        now:
-          ACTIVE_RIDE_NAVIGATION_REROUTE_COOLDOWN_MS -
-          1,
+        now: ACTIVE_RIDE_NAVIGATION_REROUTE_COOLDOWN_MS - 1,
         lastRerouteAt: 0,
         isRerouteInFlight: false,
         snapshot: {
@@ -336,7 +330,8 @@ export function getRerouteCandidate({
 
   const latestPoint = snapshot.routePoints.at(-1);
   const currentCoordinate =
-    snapshot.currentCoordinate ?? (latestPoint ? toRouteCoordinate(latestPoint) : null);
+    snapshot.currentCoordinate ??
+    (latestPoint ? toRouteCoordinate(latestPoint) : null);
 
   if (!currentCoordinate) {
     return null;
@@ -387,6 +382,7 @@ git commit -m "Add active ride navigation geometry"
 ### Task 2: Origin Adapter
 
 **Files:**
+
 - Create: `src/features/ride/activeRideNavigationOrigin.ts`
 - Create: `src/features/ride/activeRideNavigationOrigin.test.ts`
 - Modify: `src/features/ride/activeRideNavigation.ts`
@@ -657,6 +653,7 @@ git commit -m "Add active ride navigation origin adapter"
 ### Task 3: Production Provider And Recents Adapters
 
 **Files:**
+
 - Create: `src/features/ride/activeRideNavigationAdapters.ts`
 - Create: `src/features/ride/activeRideNavigationAdapters.test.ts`
 - Modify: `src/features/ride/activeRideNavigation.ts`
@@ -901,6 +898,7 @@ git commit -m "Add active ride navigation adapters"
 ### Task 4: Testable Controller And Hook
 
 **Files:**
+
 - Modify: `src/features/ride/activeRideNavigation.ts`
 - Modify: `src/features/ride/activeRideNavigation.test.ts`
 
@@ -928,7 +926,6 @@ import type {
 Then append this controller test code below the existing reroute-gate tests:
 
 ```ts
-
 function createAdapters(): {
   adapters: ActiveRideNavigationAdapters;
   calls: {
@@ -1007,7 +1004,9 @@ describe('createActiveRideNavigationController', () => {
     });
     expect(controller.getState().destinationOptions).toHaveLength(1);
 
-    await controller.selectDestination(controller.getState().destinationOptions[0]);
+    await controller.selectDestination(
+      controller.getState().destinationOptions[0],
+    );
 
     expect(controller.getState().plannedRoute?.destination).toBe('Coffee');
     expect(controller.getState().selectedDestination?.name).toBe('Coffee');
@@ -1539,6 +1538,7 @@ git commit -m "Add active ride navigation controller"
 ### Task 5: Home Route Integration
 
 **Files:**
+
 - Modify: `app/index.tsx`
 
 - [ ] **Step 1: Update route-planning imports**
@@ -1620,8 +1620,9 @@ const [routePlanError, setRoutePlanError] = useState<string | null>(null);
 Add after `const recorder = useForegroundRideRecorder(settings);`:
 
 ```ts
-const activeRideNavigationOriginRef =
-  useRef<ReturnType<typeof createExpoRouteOriginAdapter> | null>(null);
+const activeRideNavigationOriginRef = useRef<ReturnType<
+  typeof createExpoRouteOriginAdapter
+> | null>(null);
 
 if (!activeRideNavigationOriginRef.current) {
   activeRideNavigationOriginRef.current = createExpoRouteOriginAdapter();
@@ -1760,7 +1761,7 @@ openRoutePlanner();
 If there is no helper and only inline UI opening exists, use:
 
 ```tsx
-onPress={openRoutePlanner}
+onPress = { openRoutePlanner };
 ```
 
 - [ ] **Step 8: Run typecheck and apply the reference map**
@@ -1814,6 +1815,7 @@ git commit -m "Use active ride navigation in home route"
 ### Task 6: Full Verification And Cleanup
 
 **Files:**
+
 - Modify only if verification exposes a necessary behavior-preserving fix.
 
 - [ ] **Step 1: Run all tests**

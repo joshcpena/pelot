@@ -249,8 +249,9 @@ export default function HomeScreen() {
   const dashboardPageWidth = Math.max(windowWidth, 1);
   const routePlannerMaxHeight = Math.max(windowHeight * 0.8, 1);
   const recorder = useForegroundRideRecorder(settings);
-  const activeRideNavigationOriginRef =
-    useRef<ReturnType<typeof createExpoRouteOriginAdapter> | null>(null);
+  const activeRideNavigationOriginRef = useRef<ReturnType<
+    typeof createExpoRouteOriginAdapter
+  > | null>(null);
 
   if (!activeRideNavigationOriginRef.current) {
     activeRideNavigationOriginRef.current = createExpoRouteOriginAdapter();
