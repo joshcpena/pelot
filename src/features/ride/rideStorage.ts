@@ -1,12 +1,8 @@
 import { getDatabase, initializeDatabase } from '../../lib/database';
 import { withEstimatedCalories } from './metrics';
-import {
-  buildRideSplits,
-  calculateMetricsFromPoints,
-  type RidePauseInterval,
-  type RideSplit,
-} from './rideCalculations';
-import type { RideMetrics, RidePoint, RideSettings, UnitSystem } from './types';
+import { buildRideSplits, type RideSplit } from './rideCalculations';
+import type { RideRecordingFinishSnapshot } from './rideRecordingAccumulator';
+import type { RidePoint, RideSettings, UnitSystem } from './types';
 
 export { calculateMetricsFromPoints } from './rideCalculations';
 export type { RidePauseInterval, RideSplit } from './rideCalculations';
@@ -345,42 +341,15 @@ async function replaceRideSplits(rideId: string, splits: RideSplit[]) {
 
 export async function finishRide(
   rideId: string,
-  fallbackMetrics: RideMetrics,
+  finishSnapshot: RideRecordingFinishSnapshot,
   settings: RideSettings,
-  pauseIntervals: RidePauseInterval[] = [],
 ): Promise<FinishedRideSummary> {
   const points = await loadRidePoints(rideId);
-  const pointMetrics =
-    points.length > 1
-      ? calculateMetricsFromPoints(points, pauseIntervals)
-      : null;
-  const distanceMeters =
-    pointMetrics?.distanceMeters ?? fallbackMetrics.distanceMeters;
-  const movingSeconds = Math.max(
-    0,
-    Math.min(fallbackMetrics.movingSeconds, fallbackMetrics.elapsedSeconds),
-  );
-  const metrics = withEstimatedCalories(
-    pointMetrics
-      ? {
-          ...fallbackMetrics,
-          startedAt: pointMetrics.startedAt ?? fallbackMetrics.startedAt,
-          distanceMeters,
-          ascentMeters: pointMetrics.ascentMeters,
-          currentSpeedMps: pointMetrics.currentSpeedMps,
-          averageSpeedMps:
-            movingSeconds > 0 ? distanceMeters / movingSeconds : 0,
-          maxSpeedMps: Math.max(
-            fallbackMetrics.maxSpeedMps,
-            pointMetrics.maxSpeedMps,
-          ),
-          movingSeconds,
-        }
-      : fallbackMetrics,
-    settings,
-  );
+  const metrics = withEstimatedCalories(finishSnapshot.metrics, settings);
   const splits =
-    points.length > 1 ? buildRideSplits(points, settings, pauseIntervals) : [];
+    points.length > 1
+      ? buildRideSplits(points, settings, finishSnapshot.pauseIntervals)
+      : [];
   const db = await getDatabase();
   const endedAt = Date.now();
 
@@ -396,7 +365,7 @@ export async function finishRide(
          max_speed_mps = ?
      WHERE id = ?`,
     endedAt,
-    metrics.elapsedSeconds || fallbackMetrics.elapsedSeconds,
+    metrics.elapsedSeconds || finishSnapshot.metrics.elapsedSeconds,
     metrics.movingSeconds,
     metrics.distanceMeters,
     metrics.ascentMeters,
@@ -410,7 +379,10 @@ export async function finishRide(
 
   const savedMetrics = metrics.elapsedSeconds
     ? metrics
-    : { ...metrics, elapsedSeconds: fallbackMetrics.elapsedSeconds };
+    : {
+        ...metrics,
+        elapsedSeconds: finishSnapshot.metrics.elapsedSeconds,
+      };
 
   const summary = await loadRideSummary(rideId);
 
@@ -418,7 +390,8 @@ export async function finishRide(
     summary: summary ?? {
       id: rideId,
       title: null,
-      startedAt: savedMetrics.startedAt ?? fallbackMetrics.startedAt ?? endedAt,
+      startedAt:
+        savedMetrics.startedAt ?? finishSnapshot.metrics.startedAt ?? endedAt,
       endedAt,
       elapsedSeconds: savedMetrics.elapsedSeconds,
       movingSeconds: savedMetrics.movingSeconds,

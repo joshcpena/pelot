@@ -26,6 +26,7 @@ import {
   type FinishedRideSummary,
   type RidePauseInterval,
 } from './rideStorage';
+import type { RideRecordingFinishSnapshot } from './rideRecordingAccumulator';
 import { areRidePointListsEqual, mergeRidePoints } from './ridePoints';
 import type {
   RideMetrics,
@@ -1147,11 +1148,16 @@ export function useForegroundRideRecorder(settings: RideSettings) {
       let finishedRide: FinishedRideSummary | null = null;
 
       if (rideIdRef.current) {
+        const finishSnapshot: RideRecordingFinishSnapshot = {
+          metrics: finalMetrics,
+          routePoints: routePointsRef.current,
+          pauseIntervals: getPauseIntervals(stoppedAt),
+        };
+
         finishedRide = await finishRide(
           rideIdRef.current,
-          finalMetrics,
+          finishSnapshot,
           settings,
-          getPauseIntervals(stoppedAt),
         );
         updateMetrics({
           ...finalMetrics,
