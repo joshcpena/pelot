@@ -766,3 +766,89 @@ describe('ride point ingestion', () => {
     );
   });
 });
+
+describe('persisted point replay and finish snapshots', () => {
+  it('replays persisted points while keeping live timing as authority', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({ autoPause: false }),
+      startedAt: BASE_TIME,
+    });
+
+    accumulator.refreshTiming(BASE_TIME + 100_000);
+    accumulator.replacePointsFromPersistence(
+      [pointAtMeters(0, 0), pointAtMeters(20, 100), pointAtMeters(40, 250)],
+      BASE_TIME + 100_000,
+    );
+
+    expect(accumulator.getMetrics()).toMatchObject({
+      elapsedSeconds: 100,
+      movingSeconds: 100,
+      lapElapsedSeconds: 100,
+      lapMovingSeconds: 100,
+    });
+    expect(accumulator.getMetrics().distanceMeters).toBeCloseTo(250, 6);
+    expect(accumulator.getMetrics().averageSpeedMps).toBeCloseTo(2.5, 6);
+    expect(accumulator.getMetrics().maxSpeedMps).toBeCloseTo(7.5, 6);
+  });
+
+  it('commits open pauses and freezes finish metrics', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({ autoPause: false }),
+      startedAt: BASE_TIME,
+    });
+
+    accumulator.ingestPoint(pointAtMeters(0, 0), BASE_TIME);
+    accumulator.beginManualPause(BASE_TIME + 10_000);
+    accumulator.ingestPoint(pointAtMeters(20, 200), BASE_TIME + 20_000);
+
+    const snapshot = accumulator.finish(BASE_TIME + 30_000);
+
+    expect(snapshot.pauseIntervals).toEqual([
+      { startedAt: BASE_TIME + 10_000, endedAt: BASE_TIME + 30_000 },
+    ]);
+    expect(snapshot.metrics.elapsedSeconds).toBe(30);
+    expect(snapshot.metrics.pausedSeconds).toBe(20);
+    expect(snapshot.metrics.movingSeconds).toBe(10);
+    expect(snapshot.routePoints).toHaveLength(2);
+
+    accumulator.refreshTiming(BASE_TIME + 60_000);
+    expect(accumulator.getMetrics().elapsedSeconds).toBe(30);
+  });
+
+  it('uses accumulator live metrics when finishing with too few points', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({ autoPause: false }),
+      startedAt: BASE_TIME,
+    });
+
+    accumulator.refreshTiming(BASE_TIME + 45_000);
+    accumulator.ingestPoint(pointAtMeters(45, 0), BASE_TIME + 45_000);
+
+    const snapshot = accumulator.finish(BASE_TIME + 60_000);
+
+    expect(snapshot.metrics.elapsedSeconds).toBe(60);
+    expect(snapshot.metrics.movingSeconds).toBe(60);
+    expect(snapshot.metrics.distanceMeters).toBe(0);
+    expect(snapshot.metrics.averageSpeedMps).toBe(0);
+  });
+
+  it('refreshes calories for total and lap metrics', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({
+        autoPause: false,
+        autoLap: false,
+        riderWeightKg: 82,
+        riderHeightCm: 178,
+        riderAgeYears: 38,
+        riderSex: 'male',
+      }),
+      startedAt: BASE_TIME,
+    });
+
+    accumulator.ingestPoint(pointAtMeters(0, 0), BASE_TIME);
+    accumulator.ingestPoint(pointAtMeters(600, 5000), BASE_TIME + 600_000);
+
+    expect(accumulator.getMetrics().activeCaloriesKcal).toBeGreaterThan(0);
+    expect(accumulator.getMetrics().lapActiveCaloriesKcal).toBeGreaterThan(0);
+  });
+});

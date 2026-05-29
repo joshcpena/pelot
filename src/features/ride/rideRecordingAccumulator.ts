@@ -786,8 +786,12 @@ export function createRideRecordingAccumulator({
     finish(now = Date.now()) {
       const timingNow = getTimingNow(now);
 
-      commitManualPausedTime(timingNow);
       commitAutoPausedTime(timingNow);
+      if (manualPausedStartedAt != null) {
+        const pausedStartedAt = manualPausedStartedAt;
+        manualPausedStartedAt = null;
+        commitPauseInterval(pausedStartedAt, timingNow);
+      }
       isAutoPaused = false;
       stoppedAt = timingNow;
       refreshTimingState(timingNow);
@@ -795,7 +799,7 @@ export function createRideRecordingAccumulator({
       return {
         metrics: cloneMetrics(metrics),
         routePoints: [...routePoints],
-        pauseIntervals: [...pauseIntervals],
+        pauseIntervals: getNormalizedPauseIntervals(timingNow),
       };
     },
   };
