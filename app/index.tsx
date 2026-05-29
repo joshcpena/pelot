@@ -279,6 +279,7 @@ export default function HomeScreen() {
     routePlanError,
     isSearchingDestinations,
     isPlanningRoute,
+    maybeReroute,
   } = activeRideNavigation;
   const autoDimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldAutoDimRideScreenRef = useRef(false);
@@ -712,9 +713,9 @@ export default function HomeScreen() {
   }, [isRoutePlannerOpen]);
 
   useEffect(() => {
-    activeRideNavigation.maybeReroute().catch(() => undefined);
+    maybeReroute().catch(() => undefined);
   }, [
-    activeRideNavigation.maybeReroute,
+    maybeReroute,
     plannedRoute,
     recorder.currentCoordinate,
     recorder.routePoints,
