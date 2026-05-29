@@ -733,4 +733,36 @@ describe('ride point ingestion', () => {
       { startedAt: BASE_TIME, endedAt: BASE_TIME + 10_500 },
     ]);
   });
+
+  it('replays max speed from auto-pause boundary segments like live ingestion', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({ autoPause: true }),
+      startedAt: BASE_TIME,
+    });
+    const routePoints = [
+      pointAtMeters(0, 0, { speedMps: 10 }),
+      pointAtMeters(10, 2, { speedMps: 0.2 }),
+      pointAtMeters(20, 102, { speedMps: 18 }),
+    ];
+
+    accumulator.ingestPoint(routePoints[0], BASE_TIME);
+    accumulator.ingestPoint(routePoints[1], BASE_TIME + 10_000);
+    accumulator.ingestPoint(routePoints[2], BASE_TIME + 20_000);
+
+    const liveMetrics = accumulator.getMetrics();
+
+    expect(liveMetrics.distanceMeters).toBe(0);
+    expect(liveMetrics.lapDistanceMeters).toBe(0);
+    expect(liveMetrics.maxSpeedMps).toBe(18);
+    expect(liveMetrics.lapMaxSpeedMps).toBe(18);
+
+    accumulator.replacePointsFromPersistence(routePoints, BASE_TIME + 20_000);
+
+    expect(accumulator.getMetrics().distanceMeters).toBe(0);
+    expect(accumulator.getMetrics().lapDistanceMeters).toBe(0);
+    expect(accumulator.getMetrics().maxSpeedMps).toBe(liveMetrics.maxSpeedMps);
+    expect(accumulator.getMetrics().lapMaxSpeedMps).toBe(
+      liveMetrics.lapMaxSpeedMps,
+    );
+  });
 });

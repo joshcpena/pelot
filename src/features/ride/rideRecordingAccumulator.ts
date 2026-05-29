@@ -158,6 +158,7 @@ function calculateAccumulatorReplayMetrics(
     const speed = getAccumulatorReplaySpeed(previous, next, distance, seconds);
 
     currentSpeedMps = speed;
+    maxSpeedMps = Math.max(maxSpeedMps, speed);
 
     if (
       doesSegmentOverlapPause(
@@ -172,7 +173,6 @@ function calculateAccumulatorReplayMetrics(
     distanceMeters += distance;
     ascentMeters += positiveElevationGainMeters(previous, next);
     movingSeconds += seconds;
-    maxSpeedMps = Math.max(maxSpeedMps, speed);
   }
 
   const elapsedSeconds =
