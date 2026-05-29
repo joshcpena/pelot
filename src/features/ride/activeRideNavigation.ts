@@ -26,6 +26,42 @@ export type ActiveRideNavigationOriginAdapter = {
   ) => Promise<RouteCoordinate>;
 };
 
+export type ActiveRideNavigationPlaceSearchAdapter = {
+  search: (input: {
+    query: string;
+    origin: RouteCoordinate;
+  }) => Promise<DestinationOption[]>;
+};
+
+export type ActiveRideNavigationRoutePlannerAdapter = {
+  plan: (input: {
+    destination: DestinationOption;
+    origin: RouteCoordinate;
+    routeProfile: RouteProfile;
+  }) => Promise<PlannedRoute>;
+};
+
+export type ActiveRideNavigationRecentsAdapter = {
+  load: () => Promise<DestinationOption[]>;
+  getUpdated: (
+    destination: DestinationOption,
+    currentDestinations: DestinationOption[],
+  ) => DestinationOption[];
+  save: (destinations: DestinationOption[]) => Promise<void>;
+};
+
+export type ActiveRideNavigationClock = {
+  now: () => number;
+};
+
+export type ActiveRideNavigationAdapters = {
+  origin: ActiveRideNavigationOriginAdapter;
+  placeSearch: ActiveRideNavigationPlaceSearchAdapter;
+  routePlanner: ActiveRideNavigationRoutePlannerAdapter;
+  recents: ActiveRideNavigationRecentsAdapter;
+  clock: ActiveRideNavigationClock;
+};
+
 export const ACTIVE_RIDE_NAVIGATION_LOCATION_PERMISSION_ERROR =
   'Location permission is required to plan a route.';
 
