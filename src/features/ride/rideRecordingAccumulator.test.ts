@@ -433,7 +433,9 @@ describe('ride point ingestion', () => {
       startedAt: BASE_TIME,
     });
 
-    timeAccumulator.refreshTiming(BASE_TIME + 10_000);
+    expect(timeAccumulator.refreshTiming(BASE_TIME + 10_000)).toEqual({
+      didAutoLap: true,
+    });
 
     expect(timeAccumulator.getMetrics()).toMatchObject({
       lapNumber: 2,
