@@ -53,14 +53,45 @@ describe('calculateMetricsFromPoints', () => {
 
   it('excludes segments that overlap a pause interval', () => {
     const metrics = calculateMetricsFromPoints(
-      [point(0, 0), point(10, 100), point(20, 200)],
+      [
+        point(0, 0, { altitude: 100 }),
+        point(10, 100, { altitude: 100 }),
+        point(20, 200, { altitude: 105 }),
+        point(30, 300, { altitude: 106 }),
+      ],
       [pause(10, 20)],
     );
 
-    expect(metrics.elapsedSeconds).toBe(20);
-    expect(metrics.movingSeconds).toBe(10);
-    expect(metrics.distanceMeters).toBeCloseTo(100, 6);
+    expect(metrics.elapsedSeconds).toBe(30);
+    expect(metrics.movingSeconds).toBe(20);
+    expect(metrics.distanceMeters).toBeCloseTo(200, 6);
+    expect(metrics.ascentMeters).toBe(0);
     expect(metrics.averageSpeedMps).toBeCloseTo(10, 6);
+  });
+
+  it('counts sustained climbs even when each sample rises below the noise threshold', () => {
+    const metrics = calculateMetricsFromPoints([
+      point(0, 0, { altitude: 100 }),
+      point(10, 50, { altitude: 101 }),
+      point(20, 100, { altitude: 102 }),
+      point(30, 150, { altitude: 103 }),
+      point(40, 200, { altitude: 104 }),
+      point(50, 250, { altitude: 105 }),
+    ]);
+
+    expect(metrics.ascentMeters).toBe(5);
+    expect(metrics.lapAscentMeters).toBe(5);
+  });
+
+  it('uses the lower barometer-preferred ascent threshold for summary metrics', () => {
+    const metrics = calculateMetricsFromPoints(
+      [point(0, 0, { altitude: 100 }), point(10, 50, { altitude: 101 })],
+      [],
+      'barometer-preferred',
+    );
+
+    expect(metrics.ascentMeters).toBe(1);
+    expect(metrics.lapAscentMeters).toBe(1);
   });
 });
 

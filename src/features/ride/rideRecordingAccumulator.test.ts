@@ -345,6 +345,42 @@ describe('ride point ingestion', () => {
     expect(accumulator.getMetrics().lapAscentMeters).toBe(4);
   });
 
+  it('counts sustained climbs during live recording when each sample rises below the noise threshold', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({ autoPause: false }),
+      startedAt: BASE_TIME,
+    });
+
+    [100, 101, 102, 103, 104, 105].forEach((altitude, index) => {
+      accumulator.ingestPoint(
+        pointAtMeters(index * 10, index * 50, { altitude }),
+        BASE_TIME + index * 10_000,
+      );
+    });
+
+    expect(accumulator.getMetrics().ascentMeters).toBe(5);
+    expect(accumulator.getMetrics().lapAscentMeters).toBe(5);
+  });
+
+  it('uses the lower barometer-preferred ascent threshold during live recording', () => {
+    const accumulator = createRideRecordingAccumulator({
+      settings: settings({
+        autoPause: false,
+        ascentSource: 'barometer-preferred',
+      }),
+      startedAt: BASE_TIME,
+    });
+
+    accumulator.ingestPoint(pointAtMeters(0, 0, { altitude: 100 }), BASE_TIME);
+    accumulator.ingestPoint(
+      pointAtMeters(10, 50, { altitude: 101 }),
+      BASE_TIME + 10_000,
+    );
+
+    expect(accumulator.getMetrics().ascentMeters).toBe(1);
+    expect(accumulator.getMetrics().lapAscentMeters).toBe(1);
+  });
+
   it('uses reported speed for current and max speed when present', () => {
     const accumulator = createRideRecordingAccumulator({
       settings: settings({ autoPause: false }),
@@ -398,34 +434,37 @@ describe('ride point ingestion', () => {
       startedAt: BASE_TIME,
     });
 
-    accumulator.ingestPoint(pointAtMeters(0, 0), BASE_TIME);
+    accumulator.ingestPoint(pointAtMeters(0, 0, { altitude: 100 }), BASE_TIME);
     accumulator.ingestPoint(
-      pointAtMeters(10, 2, { speedMps: 0.2 }),
+      pointAtMeters(10, 2, { altitude: 105, speedMps: 0.2 }),
       BASE_TIME + 10_000,
     );
 
     expect(accumulator.getIsAutoPaused()).toBe(true);
     expect(accumulator.getMetrics().distanceMeters).toBe(0);
+    expect(accumulator.getMetrics().ascentMeters).toBe(0);
     expect(accumulator.getMetrics().movingSeconds).toBe(0);
     expect(accumulator.getMetrics().pausedSeconds).toBe(10);
 
     accumulator.ingestPoint(
-      pointAtMeters(20, 102, { speedMps: 10 }),
+      pointAtMeters(20, 102, { altitude: 110, speedMps: 10 }),
       BASE_TIME + 20_000,
     );
 
     expect(accumulator.getIsAutoPaused()).toBe(false);
     expect(accumulator.getMetrics().distanceMeters).toBe(0);
+    expect(accumulator.getMetrics().ascentMeters).toBe(0);
     expect(accumulator.getPauseIntervals()).toEqual([
       { startedAt: BASE_TIME, endedAt: BASE_TIME + 20_000 },
     ]);
 
     accumulator.ingestPoint(
-      pointAtMeters(30, 202, { speedMps: 10 }),
+      pointAtMeters(30, 202, { altitude: 111, speedMps: 10 }),
       BASE_TIME + 30_000,
     );
 
     expect(accumulator.getMetrics().distanceMeters).toBeCloseTo(100, 6);
+    expect(accumulator.getMetrics().ascentMeters).toBe(0);
     expect(accumulator.getMetrics().movingSeconds).toBe(10);
   });
 

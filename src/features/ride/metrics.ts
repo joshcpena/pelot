@@ -1,7 +1,26 @@
-import type { RideMetrics, RidePoint, RideSettings } from './types';
+import type {
+  AscentSource,
+  RideMetrics,
+  RidePoint,
+  RideSettings,
+} from './types';
 
 const EARTH_RADIUS_METERS = 6_371_000;
 const METERS_PER_SECOND_TO_MILES_PER_HOUR = 2.236936;
+const GPS_ELEVATION_GAIN_THRESHOLD_METERS = 1.5;
+const BAROMETER_ELEVATION_GAIN_THRESHOLD_METERS = 1;
+
+type ElevationTrend = 'unknown' | 'ascending' | 'descending';
+
+export type ElevationGainAccumulator = {
+  addAltitude(altitude: number | null): number;
+  addSegment(
+    previous: Pick<RidePoint, 'altitude'>,
+    next: Pick<RidePoint, 'altitude'>,
+  ): number;
+  resetBaseline(altitude: number | null): number;
+  getGainMeters(): number;
+};
 
 function toRadians(degrees: number) {
   return (degrees * Math.PI) / 180;
@@ -27,13 +46,152 @@ export function distanceBetweenMeters(a: RidePoint, b: RidePoint) {
 export function positiveElevationGainMeters(
   previous: RidePoint,
   next: RidePoint,
+  thresholdMeters = GPS_ELEVATION_GAIN_THRESHOLD_METERS,
 ) {
   if (previous.altitude == null || next.altitude == null) {
     return 0;
   }
 
   const gain = next.altitude - previous.altitude;
-  return gain >= 3 ? gain : 0;
+  return gain >= thresholdMeters ? gain : 0;
+}
+
+export function getElevationGainThresholdMeters(ascentSource: AscentSource) {
+  return ascentSource === 'barometer-preferred'
+    ? BAROMETER_ELEVATION_GAIN_THRESHOLD_METERS
+    : GPS_ELEVATION_GAIN_THRESHOLD_METERS;
+}
+
+export function createElevationGainAccumulator(
+  thresholdMeters = GPS_ELEVATION_GAIN_THRESHOLD_METERS,
+): ElevationGainAccumulator {
+  let committedGainMeters = 0;
+  let lowAltitude: number | null = null;
+  let highAltitude: number | null = null;
+  let trend: ElevationTrend = 'unknown';
+
+  function setBaseline(altitude: number) {
+    lowAltitude = altitude;
+    highAltitude = altitude;
+    trend = 'unknown';
+  }
+
+  function getActiveClimbMeters() {
+    if (trend !== 'ascending' || lowAltitude == null || highAltitude == null) {
+      return 0;
+    }
+
+    const activeClimbMeters = highAltitude - lowAltitude;
+
+    return activeClimbMeters >= thresholdMeters ? activeClimbMeters : 0;
+  }
+
+  function commitActiveClimb() {
+    committedGainMeters += getActiveClimbMeters();
+  }
+
+  function getGainMeters() {
+    return committedGainMeters + getActiveClimbMeters();
+  }
+
+  function addAltitude(altitude: number | null) {
+    if (altitude == null) {
+      return getGainMeters();
+    }
+
+    if (lowAltitude == null || highAltitude == null) {
+      setBaseline(altitude);
+      return getGainMeters();
+    }
+
+    if (trend === 'ascending') {
+      if (altitude > highAltitude) {
+        highAltitude = altitude;
+      } else if (highAltitude - altitude >= thresholdMeters) {
+        commitActiveClimb();
+        setBaseline(altitude);
+        trend = 'descending';
+      }
+
+      return getGainMeters();
+    }
+
+    if (trend === 'descending') {
+      if (altitude < lowAltitude) {
+        lowAltitude = altitude;
+        highAltitude = altitude;
+      } else if (altitude - lowAltitude >= thresholdMeters) {
+        highAltitude = altitude;
+        trend = 'ascending';
+      }
+
+      return getGainMeters();
+    }
+
+    if (altitude > highAltitude) {
+      highAltitude = altitude;
+    }
+
+    if (altitude < lowAltitude) {
+      lowAltitude = altitude;
+    }
+
+    if (highAltitude - lowAltitude >= thresholdMeters) {
+      if (altitude >= highAltitude) {
+        trend = 'ascending';
+      } else {
+        setBaseline(altitude);
+        trend = 'descending';
+      }
+    }
+
+    return getGainMeters();
+  }
+
+  return {
+    addAltitude,
+    addSegment(previous, next) {
+      addAltitude(previous.altitude);
+      return addAltitude(next.altitude);
+    },
+    resetBaseline(altitude) {
+      commitActiveClimb();
+      lowAltitude = null;
+      highAltitude = null;
+      trend = 'unknown';
+
+      if (altitude != null) {
+        setBaseline(altitude);
+      }
+
+      return getGainMeters();
+    },
+    getGainMeters,
+  };
+}
+
+export function calculateElevationGainMeters<
+  TPoint extends Pick<RidePoint, 'altitude'>,
+>(
+  points: TPoint[],
+  shouldCountSegment: (previous: TPoint, next: TPoint) => boolean = () => true,
+  thresholdMeters = GPS_ELEVATION_GAIN_THRESHOLD_METERS,
+) {
+  const accumulator = createElevationGainAccumulator(thresholdMeters);
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const next = points[index];
+
+    if (!shouldCountSegment(previous, next)) {
+      accumulator.resetBaseline(next.altitude);
+      continue;
+    }
+
+    accumulator.addSegment(previous, next);
+  }
+
+  return accumulator.getGainMeters();
 }
 
 export function formatDuration(totalSeconds: number) {

@@ -54,7 +54,7 @@ describe('elevation gain', () => {
     expect(
       positiveElevationGainMeters(
         ridePoint({ altitude: 100 }),
-        ridePoint({ altitude: 102.9 }),
+        ridePoint({ altitude: 101.49 }),
       ),
     ).toBe(0);
   });
@@ -63,9 +63,9 @@ describe('elevation gain', () => {
     expect(
       positiveElevationGainMeters(
         ridePoint({ altitude: 100 }),
-        ridePoint({ altitude: 103 }),
+        ridePoint({ altitude: 101.5 }),
       ),
-    ).toBe(3);
+    ).toBe(1.5);
   });
 
   it('ignores points without altitude data', () => {

@@ -1,4 +1,9 @@
-import { distanceBetweenMeters, positiveElevationGainMeters } from './metrics';
+import {
+  calculateElevationGainMeters,
+  createElevationGainAccumulator,
+  distanceBetweenMeters,
+  getElevationGainThresholdMeters,
+} from './metrics';
 import type { RideMetrics, RidePoint, RideSettings, SplitType } from './types';
 
 export type RideSplit = {
@@ -14,6 +19,12 @@ export type RidePauseInterval = {
   startedAt: number;
   endedAt: number;
 };
+
+type RideSplitSettings = Pick<
+  RideSettings,
+  'splitDistanceMeters' | 'splitDurationSeconds' | 'splitType'
+> &
+  Partial<Pick<RideSettings, 'ascentSource'>>;
 
 const SPLIT_EPSILON = 0.000001;
 
@@ -31,11 +42,23 @@ function doesSegmentOverlapPause(
 export function calculateMetricsFromPoints(
   points: RidePoint[],
   pauseIntervals: RidePauseInterval[] = [],
+  ascentSource: RideSettings['ascentSource'] = 'gps-only',
 ): RideMetrics {
   let distanceMeters = 0;
-  let ascentMeters = 0;
   let movingSeconds = 0;
   let maxSpeedMps = 0;
+  const elevationGainThresholdMeters =
+    getElevationGainThresholdMeters(ascentSource);
+  const ascentMeters = calculateElevationGainMeters(
+    points,
+    (previous, next) =>
+      !doesSegmentOverlapPause(
+        previous.recordedAt,
+        next.recordedAt,
+        pauseIntervals,
+      ),
+    elevationGainThresholdMeters,
+  );
 
   for (let index = 1; index < points.length; index += 1) {
     const previous = points[index - 1];
@@ -59,7 +82,6 @@ export function calculateMetricsFromPoints(
     const speed = next.speedMps ?? (seconds > 0 ? distance / seconds : 0);
 
     distanceMeters += distance;
-    ascentMeters += positiveElevationGainMeters(previous, next);
     movingSeconds += seconds;
     maxSpeedMps = Math.max(maxSpeedMps, speed);
   }
@@ -120,10 +142,7 @@ function createSplit(
 
 export function buildRideSplits(
   points: RidePoint[],
-  settings: Pick<
-    RideSettings,
-    'splitDistanceMeters' | 'splitDurationSeconds' | 'splitType'
-  >,
+  settings: RideSplitSettings,
   pauseIntervals: RidePauseInterval[] = [],
 ): RideSplit[] {
   const target =
@@ -139,6 +158,12 @@ export function buildRideSplits(
   let splitDistanceMeters = 0;
   let splitDurationSeconds = 0;
   let splitAscentMeters = 0;
+  const elevationGainThresholdMeters = getElevationGainThresholdMeters(
+    settings.ascentSource ?? 'gps-only',
+  );
+  const elevationGainAccumulator = createElevationGainAccumulator(
+    elevationGainThresholdMeters,
+  );
 
   for (let index = 1; index < points.length; index += 1) {
     const previous = points[index - 1];
@@ -155,12 +180,16 @@ export function buildRideSplits(
         pauseIntervals,
       )
     ) {
+      elevationGainAccumulator.resetBaseline(next.altitude);
       continue;
     }
 
     let remainingDistanceMeters = distanceBetweenMeters(previous, next);
     let remainingDurationSeconds = durationSeconds;
-    let remainingAscentMeters = positiveElevationGainMeters(previous, next);
+    const previousAscentMeters = elevationGainAccumulator.getGainMeters();
+    let remainingAscentMeters =
+      elevationGainAccumulator.addSegment(previous, next) -
+      previousAscentMeters;
 
     while (
       remainingDistanceMeters > SPLIT_EPSILON ||

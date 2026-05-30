@@ -1,6 +1,8 @@
 import {
+  calculateElevationGainMeters,
+  createElevationGainAccumulator,
   distanceBetweenMeters,
-  positiveElevationGainMeters,
+  getElevationGainThresholdMeters,
   withEstimatedCalories,
 } from './metrics';
 import type { RidePauseInterval } from './rideCalculations';
@@ -143,12 +145,16 @@ function getAccumulatorReplaySpeed(
 function calculateAccumulatorReplayMetrics(
   points: RidePoint[],
   pauseIntervals: RidePauseInterval[] = [],
+  elevationGainThresholdMeters = getElevationGainThresholdMeters('gps-only'),
 ): ReplayRouteMetrics {
   let distanceMeters = 0;
   let ascentMeters = 0;
   let movingSeconds = 0;
   let currentSpeedMps = points.length === 1 ? (points[0].speedMps ?? 0) : 0;
   let maxSpeedMps = 0;
+  const elevationGainAccumulator = createElevationGainAccumulator(
+    elevationGainThresholdMeters,
+  );
 
   for (let index = 1; index < points.length; index += 1) {
     const previous = points[index - 1];
@@ -167,11 +173,12 @@ function calculateAccumulatorReplayMetrics(
         pauseIntervals,
       )
     ) {
+      elevationGainAccumulator.resetBaseline(next.altitude);
       continue;
     }
 
     distanceMeters += distance;
-    ascentMeters += positiveElevationGainMeters(previous, next);
+    ascentMeters = elevationGainAccumulator.addSegment(previous, next);
     movingSeconds += seconds;
   }
 
@@ -594,9 +601,13 @@ export function createRideRecordingAccumulator({
     }
 
     const pauseIntervalsForReplay = getNormalizedPauseIntervals(now);
+    const elevationGainThresholdMeters = getElevationGainThresholdMeters(
+      settings.ascentSource,
+    );
     const totalMetrics = calculateAccumulatorReplayMetrics(
       routePoints,
       pauseIntervalsForReplay,
+      elevationGainThresholdMeters,
     );
     const timingMetrics = getTimingMetrics(now);
     const lapStartedAt = metrics.lapStartedAt;
@@ -604,6 +615,7 @@ export function createRideRecordingAccumulator({
     const lapMetrics = calculateAccumulatorReplayMetrics(
       lapPoints,
       pauseIntervalsForReplay,
+      elevationGainThresholdMeters,
     );
 
     applyMetrics(
@@ -760,18 +772,30 @@ export function createRideRecordingAccumulator({
       const nextDistanceMeters = shouldCountMovement
         ? metrics.distanceMeters + distanceMeters
         : metrics.distanceMeters;
-      const ascentMeters = shouldCountMovement
-        ? metrics.ascentMeters + positiveElevationGainMeters(previous, point)
-        : metrics.ascentMeters;
-      const lapAscentGain = previous
-        ? positiveElevationGainMeters(previous, point)
-        : 0;
+      const nextRoutePoints = [...routePoints, point];
+      const pauseIntervalsForAscent = getNormalizedPauseIntervals(now);
+      const shouldCountAscentSegment = (
+        segmentPrevious: RidePoint,
+        segmentNext: RidePoint,
+      ) =>
+        !doesSegmentOverlapPause(
+          segmentPrevious.recordedAt,
+          segmentNext.recordedAt,
+          pauseIntervalsForAscent,
+        );
+      const ascentMeters = calculateElevationGainMeters(
+        nextRoutePoints,
+        shouldCountAscentSegment,
+        getElevationGainThresholdMeters(settings.ascentSource),
+      );
       const lapDistanceMeters = shouldCountMovement
         ? metrics.lapDistanceMeters + distanceMeters
         : metrics.lapDistanceMeters;
-      const lapAscentMeters = shouldCountMovement
-        ? metrics.lapAscentMeters + lapAscentGain
-        : metrics.lapAscentMeters;
+      const lapAscentMeters = calculateElevationGainMeters(
+        getAccumulatorReplayLapPoints(nextRoutePoints, metrics.lapStartedAt),
+        shouldCountAscentSegment,
+        getElevationGainThresholdMeters(settings.ascentSource),
+      );
       const averageSpeedMps =
         movingSeconds > 0 ? nextDistanceMeters / movingSeconds : 0;
       const lapAverageSpeedMps =
@@ -779,7 +803,7 @@ export function createRideRecordingAccumulator({
       const maxSpeedMps = Math.max(metrics.maxSpeedMps, currentSpeedMps);
       const lapMaxSpeedMps = Math.max(metrics.lapMaxSpeedMps, currentSpeedMps);
 
-      routePoints = [...routePoints, point];
+      routePoints = nextRoutePoints;
       previousPoint = point;
       hasPendingManualPauseBaselineReset = false;
       manualPauseBaselineResetEndedAt = null;
